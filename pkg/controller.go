@@ -108,7 +108,7 @@ func (c *controller) Run(ctx context.Context) error {
 	}
 	klog.V(0).Info("Controller is ready!")
 
-	ticker := time.NewTicker(c.opts.MemoryUsageCheckInterval * time.Second)
+	ticker := time.NewTicker(c.opts.MemoryUsageCheckInterval)
 	defer ticker.Stop()
 
 	for {
