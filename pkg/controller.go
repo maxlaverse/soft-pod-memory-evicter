@@ -6,7 +6,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	policyv1 "k8s.io/api/policy/v1"
+	policyv1beta1 "k8s.io/api/policy/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -133,7 +133,7 @@ func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context) error {
 		return fmt.Errorf("error listing Pods to evict: %w", err)
 	}
 	for _, pod := range podList {
-		evictionPolicy := policyv1.Eviction{
+		evictionPolicy := policyv1beta1.Eviction{
 			ObjectMeta: pod.ObjectMeta,
 		}
 		if c.opts.DryRun {
@@ -144,7 +144,7 @@ func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context) error {
 		klog.V(1).Infof("Evicting Pod '%s/%s'", pod.Namespace, pod.Name)
 		c.recorder.Event(pod.DeepCopyObject(), "Normal", "SoftEviction", fmt.Sprintf("Pod '%s/%s' has at least one container close to its memory limit", pod.Namespace, pod.Name))
 
-		evictionErr := c.clientset.PolicyV1().Evictions(pod.Namespace).Evict(ctx, &evictionPolicy)
+		evictionErr := c.clientset.PolicyV1beta1().Evictions(pod.Namespace).Evict(ctx, &evictionPolicy)
 		if evictionErr != nil {
 			err = evictionErr
 			klog.Errorf("error evicting '%s/%s': %v", pod.Namespace, pod.Name, err)
