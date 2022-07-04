@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
-	policyv1 "k8s.io/api/policy/v1"
+	policyv1beta1 "k8s.io/api/policy/v1beta1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -185,9 +185,9 @@ func TestEvictionOnlyAffectsPodsMaxingoutMemory(t *testing.T) {
 	assert.Equal(t, "/v1, Resource=pods", action2.GetResource().String())
 
 	obj2 := action2.(clientgo_testing.CreateAction).GetObject()
-	assert.Equal(t, "test-pod-2", obj2.(*policyv1.Eviction).Name)
-	assert.Equal(t, "test-namespace", obj2.(*policyv1.Eviction).Namespace)
-	assert.Nil(t, obj2.(*policyv1.Eviction).DeleteOptions)
+	assert.Equal(t, "test-pod-2", obj2.(*policyv1beta1.Eviction).Name)
+	assert.Equal(t, "test-namespace", obj2.(*policyv1beta1.Eviction).Namespace)
+	assert.Nil(t, obj2.(*policyv1beta1.Eviction).DeleteOptions)
 
 	action3 := fakeClientSet.Actions()[3]
 	assert.Equal(t, "create", action3.GetVerb())
@@ -195,9 +195,9 @@ func TestEvictionOnlyAffectsPodsMaxingoutMemory(t *testing.T) {
 	assert.Equal(t, "/v1, Resource=pods", action3.GetResource().String())
 
 	obj3 := action3.(clientgo_testing.CreateAction).GetObject()
-	assert.Equal(t, "test-pod-3", obj3.(*policyv1.Eviction).Name)
-	assert.Equal(t, "test-namespace", obj3.(*policyv1.Eviction).Namespace)
-	assert.Nil(t, obj3.(*policyv1.Eviction).DeleteOptions)
+	assert.Equal(t, "test-pod-3", obj3.(*policyv1beta1.Eviction).Name)
+	assert.Equal(t, "test-namespace", obj3.(*policyv1beta1.Eviction).Namespace)
+	assert.Nil(t, obj3.(*policyv1beta1.Eviction).DeleteOptions)
 }
 
 func TestEvictionHasDryrunSet(t *testing.T) {
@@ -215,20 +215,20 @@ func TestEvictionHasDryrunSet(t *testing.T) {
 	assert.Equal(t, "eviction", action2.GetSubresource())
 
 	obj2 := action2.(clientgo_testing.CreateAction).GetObject()
-	assert.Equal(t, "test-pod-2", obj2.(*policyv1.Eviction).Name)
-	assert.Equal(t, "test-namespace", obj2.(*policyv1.Eviction).Namespace)
-	assert.Equal(t, 1, len(obj2.(*policyv1.Eviction).DeleteOptions.DryRun))
-	assert.Equal(t, "All", obj2.(*policyv1.Eviction).DeleteOptions.DryRun[0])
+	assert.Equal(t, "test-pod-2", obj2.(*policyv1beta1.Eviction).Name)
+	assert.Equal(t, "test-namespace", obj2.(*policyv1beta1.Eviction).Namespace)
+	assert.Equal(t, 1, len(obj2.(*policyv1beta1.Eviction).DeleteOptions.DryRun))
+	assert.Equal(t, "All", obj2.(*policyv1beta1.Eviction).DeleteOptions.DryRun[0])
 
 	action3 := fakeClientSet.Actions()[3]
 	assert.Equal(t, "create", action3.GetVerb())
 	assert.Equal(t, "eviction", action3.GetSubresource())
 
 	obj3 := action3.(clientgo_testing.CreateAction).GetObject()
-	assert.Equal(t, "test-pod-3", obj3.(*policyv1.Eviction).Name)
-	assert.Equal(t, "test-namespace", obj3.(*policyv1.Eviction).Namespace)
-	assert.Equal(t, 1, len(obj3.(*policyv1.Eviction).DeleteOptions.DryRun))
-	assert.Equal(t, "All", obj3.(*policyv1.Eviction).DeleteOptions.DryRun[0])
+	assert.Equal(t, "test-pod-3", obj3.(*policyv1beta1.Eviction).Name)
+	assert.Equal(t, "test-namespace", obj3.(*policyv1beta1.Eviction).Namespace)
+	assert.Equal(t, 1, len(obj3.(*policyv1beta1.Eviction).DeleteOptions.DryRun))
+	assert.Equal(t, "All", obj3.(*policyv1beta1.Eviction).DeleteOptions.DryRun[0])
 }
 
 func fakeController(pairs ...testPod) *controller {
