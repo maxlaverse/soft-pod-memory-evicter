@@ -21,7 +21,7 @@ import (
 
 const (
 	// componentName is used when creating Kubernetes Events
-	componentName = "pod-soft-memory-evicter"
+	componentName = "soft-pod-memory-evicter"
 )
 
 type Controller interface {

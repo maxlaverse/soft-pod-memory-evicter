@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/maxlaverse/pod-soft-memory-evicter/pkg"
+	"github.com/maxlaverse/soft-pod-memory-evicter/pkg"
 	"github.com/urfave/cli/v2"
 	"k8s.io/klog/v2"
 )
@@ -21,7 +21,7 @@ func main() {
 	}
 
 	app := &cli.App{
-		Name:  "pod-soft-memory-evicter",
+		Name:  "soft-pod-memory-evicter",
 		Usage: "Gracefully evict Pods before they get OOM killed",
 		Flags: []cli.Flag{
 			&cli.BoolFlag{

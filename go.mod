@@ -1,4 +1,4 @@
-module github.com/maxlaverse/pod-soft-memory-evicter
+module github.com/maxlaverse/soft-pod-memory-evicter
 
 go 1.18
 
