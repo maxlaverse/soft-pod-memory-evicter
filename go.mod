@@ -5,9 +5,9 @@ go 1.18
 require (
 	github.com/stretchr/testify v1.8.0
 	github.com/urfave/cli/v2 v2.11.1
-	k8s.io/api v0.24.2
+	k8s.io/api v0.24.3
 	k8s.io/apimachinery v0.24.3
-	k8s.io/client-go v0.24.2
+	k8s.io/client-go v0.24.3
 	k8s.io/klog/v2 v2.70.1
 	k8s.io/metrics v0.24.2
 )
