@@ -3,7 +3,7 @@ module github.com/maxlaverse/soft-pod-memory-evicter
 go 1.18
 
 require (
-	github.com/stretchr/testify v1.8.0
+	github.com/stretchr/testify v1.8.1
 	github.com/urfave/cli/v2 v2.24.2
 	k8s.io/api v0.26.1
 	k8s.io/apimachinery v0.26.1
