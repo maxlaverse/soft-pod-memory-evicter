@@ -144,17 +144,18 @@ func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context) error {
 		klog.V(1).Infof("Evicting Pod '%s/%s'", pod.Namespace, pod.Name)
 		c.recorder.Event(pod.DeepCopyObject(), "Normal", "SoftEviction", fmt.Sprintf("Pod '%s/%s' has at least one container close to its memory limit", pod.Namespace, pod.Name))
 
-		evictionErr := c.clientset.PolicyV1beta1().Evictions(pod.Namespace).Evict(ctx, &evictionPolicy)
-		if evictionErr != nil {
-			err = evictionErr
+		err := c.clientset.PolicyV1beta1().Evictions(pod.Namespace).Evict(ctx, &evictionPolicy)
+		if err != nil {
+			c.recorder.Event(pod.DeepCopyObject(), "Warning", "SoftEviction", fmt.Sprintf("Unable to evict Pod '%s/%s' : %v", pod.Namespace, pod.Name, err))
 			klog.Errorf("error evicting '%s/%s': %v", pod.Namespace, pod.Name, err)
+			continue
 		}
 
 		if c.opts.EvictionPause > 0 {
 			time.Sleep(c.opts.EvictionPause)
 		}
 	}
-	return err
+	return nil
 }
 
 func (c *controller) listPodsCloseToMemoryLimit(ctx context.Context) ([]*corev1.Pod, error) {
