@@ -207,7 +207,13 @@ func identifyContainersCloseToMemoryLimit(ctx context.Context, podMetrics metric
 		}
 
 		if containerDefinition.Resources.Limits == nil {
+			klog.V(3).Infof("No limits found for container '%s/%s/%s'", podMetrics.Namespace, podMetrics.Name, containerMetric.Name)
+			continue
+		} else if containerDefinition.Resources.Limits.Memory() == nil {
 			klog.V(3).Infof("No memory limit found for container '%s/%s/%s'", podMetrics.Namespace, podMetrics.Name, containerMetric.Name)
+			continue
+		} else if containerDefinition.Resources.Limits.Memory().IsZero() {
+			klog.V(3).Infof("Memory limit is 0 for container '%s/%s/%s'", podMetrics.Namespace, podMetrics.Name, containerMetric.Name)
 			continue
 		}
 		memoryUsagePercent := 100 * containerMetric.Usage.Memory().AsApproximateFloat64() / containerDefinition.Resources.Limits.Memory().AsApproximateFloat64()
