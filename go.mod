@@ -1,10 +1,10 @@
 module github.com/maxlaverse/soft-pod-memory-evicter
 
-go 1.20
+go 1.21
 
 require (
 	github.com/stretchr/testify v1.8.4
-	github.com/urfave/cli/v2 v2.25.6
+	github.com/urfave/cli/v2 v2.27.1
 	k8s.io/api v0.28.1
 	k8s.io/apimachinery v0.28.1
 	k8s.io/client-go v0.28.1
