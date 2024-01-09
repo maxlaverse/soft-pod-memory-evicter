@@ -121,7 +121,7 @@ func (c *controller) Run(ctx context.Context) error {
 		case <-ticker.C:
 			err := c.evictPodsCloseToMemoryLimit(ctx)
 			if err != nil {
-				klog.Errorf("periodic check failed: %w", err)
+				klog.Errorf("periodic check failed: %v", err)
 			}
 		}
 	}
