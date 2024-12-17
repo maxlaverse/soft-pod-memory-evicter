@@ -63,7 +63,7 @@ type controller struct {
 func NewController(opts Options) Controller {
 	clientset, err := kubernetes.NewForConfig(Configset())
 	if err != nil {
-		klog.Fatal("unable to initialize Kubernetes API Client")
+		klog.Fatalf("unable to initialize Kubernetes API Client: %s", err)
 	}
 
 	factory := informers.NewSharedInformerFactory(clientset, 0)
@@ -71,7 +71,7 @@ func NewController(opts Options) Controller {
 
 	metricsClientset, err := metrics_client.NewForConfig(Configset())
 	if err != nil {
-		klog.Fatal("unable to initialize Kubernetes Metrics Client")
+		klog.Fatalf("unable to initialize Kubernetes Metrics Client: %s", err)
 	}
 
 	eventBroadcaster := record.NewBroadcaster()
