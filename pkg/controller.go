@@ -6,7 +6,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	policyv1beta1 "k8s.io/api/policy/v1beta1"
+	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -94,6 +94,7 @@ func NewController(opts Options) Controller {
 
 func (c *controller) Run(ctx context.Context) error {
 	stopCh := make(chan struct{})
+	evictChan := make(chan *corev1.Pod, 128) // buffered channel to avoid blocking
 
 	klog.V(1).Info("1/3 Starting Factory")
 	c.factory.Start(stopCh)
@@ -102,7 +103,8 @@ func (c *controller) Run(ctx context.Context) error {
 	c.factory.WaitForCacheSync(stopCh)
 
 	klog.V(1).Info("3/3 Running initial check")
-	err := c.evictPodsCloseToMemoryLimit(ctx)
+	go c.evictChanLoop(ctx, evictChan)
+	err := c.evictPodsCloseToMemoryLimit(ctx, evictChan)
 	if err != nil {
 		return fmt.Errorf("initial check failed: %w", err)
 	}
@@ -116,10 +118,11 @@ func (c *controller) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			klog.V(0).Info("Context was cancelled, shutting down Controller!")
 			close(stopCh)
+			close(evictChan)
 			return nil
 
 		case <-ticker.C:
-			err := c.evictPodsCloseToMemoryLimit(ctx)
+			err := c.evictPodsCloseToMemoryLimit(ctx, evictChan)
 			if err != nil {
 				klog.Errorf("periodic check failed: %v", err)
 			}
@@ -127,46 +130,49 @@ func (c *controller) Run(ctx context.Context) error {
 	}
 }
 
-func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context) error {
-	podList, err := c.listPodsCloseToMemoryLimit(ctx)
-	if err != nil {
-		return fmt.Errorf("error listing Pods to evict: %w", err)
-	}
-	for _, pod := range podList {
-		evictionPolicy := policyv1beta1.Eviction{
-			ObjectMeta: pod.ObjectMeta,
-		}
-		if c.opts.DryRun {
-			evictionPolicy.DeleteOptions = &metav1.DeleteOptions{
-				DryRun: []string{"All"},
-			}
-		}
-		klog.V(1).Infof("Evicting Pod '%s/%s'", pod.Namespace, pod.Name)
-		c.recorder.Event(pod.DeepCopyObject(), "Normal", "SoftEviction", fmt.Sprintf("Pod '%s/%s' has at least one container close to its memory limit", pod.Namespace, pod.Name))
-
-		err := c.clientset.PolicyV1beta1().Evictions(pod.Namespace).Evict(ctx, &evictionPolicy)
+func (c *controller) evictChanLoop(ctx context.Context, evictChan chan *corev1.Pod) {
+	for pod := range evictChan {
+		err := c.evictPod(ctx, pod)
 		if err != nil {
-			c.recorder.Event(pod.DeepCopyObject(), "Warning", "SoftEviction", fmt.Sprintf("Unable to evict Pod '%s/%s' : %v", pod.Namespace, pod.Name, err))
-			klog.Errorf("error evicting '%s/%s': %v", pod.Namespace, pod.Name, err)
 			continue
 		}
 
 		if c.opts.EvictionPause > 0 {
+			klog.V(2).Infof("Pausing pod eviction for %s", c.opts.EvictionPause)
 			time.Sleep(c.opts.EvictionPause)
 		}
 	}
-	return nil
 }
 
-func (c *controller) listPodsCloseToMemoryLimit(ctx context.Context) ([]*corev1.Pod, error) {
+func (c *controller) evictPod(ctx context.Context, pod *corev1.Pod) error {
+	evictionPolicy := policyv1.Eviction{
+		ObjectMeta: pod.ObjectMeta,
+	}
+	if c.opts.DryRun {
+		evictionPolicy.DeleteOptions = &metav1.DeleteOptions{
+			DryRun: []string{"All"},
+		}
+	}
+	klog.V(1).Infof("Evicting Pod '%s/%s'", pod.Namespace, pod.Name)
+	c.recorder.Event(pod.DeepCopyObject(), "Normal", "SoftEviction", fmt.Sprintf("Pod '%s/%s' has at least one container close to its memory limit", pod.Namespace, pod.Name))
+
+	err := c.clientset.PolicyV1().Evictions(pod.Namespace).Evict(ctx, &evictionPolicy)
+	if err != nil {
+		c.recorder.Event(pod.DeepCopyObject(), "Warning", "SoftEviction", fmt.Sprintf("Unable to evict Pod '%s/%s' : %v", pod.Namespace, pod.Name, err))
+		klog.Errorf("error evicting '%s/%s': %v", pod.Namespace, pod.Name, err)
+	}
+
+	return err
+}
+
+func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context, evictChan chan *corev1.Pod) error {
 	klog.V(1).Info("Starting a new Pods memory usage check")
 
 	podMetrics, err := c.podMetrics.List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("unable to list Pod metrics: %w", err)
+		return fmt.Errorf("unable to list Pod metrics: %w", err)
 	}
 
-	podsToBeEvicted := []*corev1.Pod{}
 	for _, podMetric := range podMetrics.Items {
 		klog.V(2).Infof("Checking Pod '%s/%s'", podMetric.Namespace, podMetric.Name)
 		pod, err := c.lister.Pods(podMetric.Namespace).Get(podMetric.Name)
@@ -182,12 +188,12 @@ func (c *controller) listPodsCloseToMemoryLimit(ctx context.Context) ([]*corev1.
 		}
 
 		if len(containers) > 0 {
-			podsToBeEvicted = append(podsToBeEvicted, pod)
+			evictChan <- pod
 		}
 	}
 
 	klog.V(2).Info("Pods memory usage check done")
-	return podsToBeEvicted, nil
+	return nil
 }
 
 func identifyContainersCloseToMemoryLimit(ctx context.Context, podMetrics metricsv1beta1.PodMetrics, podDefinition corev1.Pod, usageMemoryUsageThresholdPercent float64) ([]string, error) {
