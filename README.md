@@ -37,6 +37,7 @@ GLOBAL OPTIONS:
    --eviction-pause value               Pause duration between evictions (default: 5m0s)
    --memory-usage-check-interval value  Interval at which the Pod metrics are checked (default: 3m0s)
    --memory-usage-threshold value       Memory usage eviction threshold (0-100) (default: 95)
+   --channel-buffer-size value          Size of the buffer for pod eviction (default: 100)
    --loglevel value, -v value           Log Level (default: 0)
    --help, -h                           show help
 ```

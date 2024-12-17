@@ -19,6 +19,7 @@ func main() {
 		EvictionPause:            time.Duration(5) * time.Minute,
 		MemoryUsageCheckInterval: time.Duration(3) * time.Minute,
 		MemoryUsageThreshold:     95,
+		ChannelBufferSize:        100,
 	}
 
 	app := &cli.App{
@@ -50,6 +51,11 @@ func main() {
 				Usage:       "Memory usage eviction threshold (0-100)",
 				Value:       opts.MemoryUsageThreshold,
 				Destination: &opts.MemoryUsageThreshold,
+			}, &cli.IntFlag{
+				Name:        "channel-buffer-size",
+				Usage:       "Size of the buffer for pod eviction",
+				Value:       opts.ChannelBufferSize,
+				Destination: &opts.ChannelBufferSize,
 			}, &cli.IntFlag{
 				Name:    "loglevel",
 				Aliases: []string{"v"},
