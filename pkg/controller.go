@@ -228,7 +228,7 @@ func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context, evictWithP
 			continue
 		}
 
-		containers, err := identifyContainersCloseToMemoryLimit(ctx, podMetric, *pod, float64(c.opts.MemoryUsageThreshold))
+		containers, err := identifyContainersCloseToMemoryLimit(podMetric, *pod, float64(c.opts.MemoryUsageThreshold))
 		if err != nil {
 			klog.Errorf("could not find Pod Container overusers '%s/%s'", podMetric.Namespace, podMetric.Name)
 			continue
@@ -240,13 +240,13 @@ func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context, evictWithP
 
 			if c.hasDisruptionBudget(ctx, pod) {
 				if len(evictWithPDBChan) == cap(evictWithPDBChan) {
-					klog.Warning("PDB channel is full, skipping eviction for Pod '%s/%s'", pod.Namespace, pod.Name)
+					klog.Warningf("PDB channel is full, skipping eviction for Pod '%s/%s'", pod.Namespace, pod.Name)
 				} else {
 					evictWithPDBChan <- pod
 				}
 			} else {
 				if len(evictWithPauseChan) == cap(evictWithPauseChan) {
-					klog.Warning("Pause channel is full, skipping eviction for Pod '%s/%s'", pod.Namespace, pod.Name)
+					klog.Warningf("Pause channel is full, skipping eviction for Pod '%s/%s'", pod.Namespace, pod.Name)
 				} else {
 					evictWithPauseChan <- pod
 				}
@@ -258,7 +258,7 @@ func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context, evictWithP
 	return nil
 }
 
-func identifyContainersCloseToMemoryLimit(ctx context.Context, podMetrics metricsv1beta1.PodMetrics, podDefinition corev1.Pod, usageMemoryUsageThresholdPercent float64) ([]string, error) {
+func identifyContainersCloseToMemoryLimit(podMetrics metricsv1beta1.PodMetrics, podDefinition corev1.Pod, usageMemoryUsageThresholdPercent float64) ([]string, error) {
 	containerOverConsuming := []string{}
 	for _, containerMetric := range podMetrics.Containers {
 		klog.V(2).Infof("Analyzing memory usage of container '%s/%s/%s'", podMetrics.Namespace, podMetrics.Name, containerMetric.Name)
@@ -297,14 +297,14 @@ func identifyContainersCloseToMemoryLimit(ctx context.Context, podMetrics metric
 func (c *controller) hasDisruptionBudget(ctx context.Context, pod *corev1.Pod) bool {
 	pdbList, err := c.clientset.PolicyV1().PodDisruptionBudgets(pod.Namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		klog.Errorf("unable to list PodDisruptionBudgets: %w", err)
+		klog.Errorf("unable to list PodDisruptionBudgets: %s", err)
 		return false
 	}
 
 	for _, pdb := range pdbList.Items {
 		selector, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)
 		if err != nil {
-			klog.Errorf("unable to convert label selector: %w", err)
+			klog.Errorf("unable to convert label selector: %s", err)
 			return false
 		}
 
