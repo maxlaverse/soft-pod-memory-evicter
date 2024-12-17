@@ -9,8 +9,8 @@ A Kubernetes Controller that evicts Pods when they're reaching their memory limi
 ## Supported Versions
 
 The controller has been tested and built with the following components:
-* Kubernetes >= 1.19
-* Metric Server >= 0.5.0
+* Kubernetes >= 1.28
+* Metric Server >= 0.7.1
 
 ## Installation
 
