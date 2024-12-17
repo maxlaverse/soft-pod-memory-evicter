@@ -20,6 +20,27 @@ helm repo update
 helm install soft-pod-memory-evicter maxlaverse/soft-pod-memory-evicter
 ```
 
+## Usage
+
+```
+NAME:
+   soft-pod-memory-evicter - Gracefully evict Pods before they get OOM killed
+
+USAGE:
+   soft-pod-memory-evicter [global options] command [command options]
+
+COMMANDS:
+   help, h  Shows a list of commands or help for one command
+
+GLOBAL OPTIONS:
+   --dry-run                            Output additional debug lines (default: false)
+   --eviction-pause value               Pause duration between evictions (default: 5m0s)
+   --memory-usage-check-interval value  Interval at which the Pod metrics are checked (default: 3m0s)
+   --memory-usage-threshold value       Memory usage eviction threshold (0-100) (default: 95)
+   --loglevel value, -v value           Log Level (default: 0)
+   --help, -h                           show help
+```
+
 ## License
 
 Distributed under the Apache License. See [LICENSE](./LICENSE) for more information.
