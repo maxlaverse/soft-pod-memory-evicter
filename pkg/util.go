@@ -6,6 +6,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
+
+	_ "k8s.io/client-go/plugin/pkg/client/auth/oidc"
 )
 
 func Configset() *rest.Config {
