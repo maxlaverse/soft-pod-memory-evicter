@@ -36,11 +36,6 @@ type Options struct {
 	// as overusing its memory.
 	MemoryUsageThreshold int
 
-	// EvictionPause is the delay we wait between two evictions, to prevent removing
-	// too many Pods at once. Else we could more easily have downtimes if Deployments
-	// don't specify a PodDisruptionBudget.
-	EvictionPause time.Duration
-
 	// MemoryUsageCheckInterval is how often we check the memory usage.
 	// It doesn't need to be too frequent, as we have to wait for the metric-server
 	// to refresh the metrics all the time.
@@ -149,10 +144,6 @@ func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context) error {
 			c.recorder.Event(pod.DeepCopyObject(), "Warning", "SoftEviction", fmt.Sprintf("Unable to evict Pod '%s/%s' : %v", pod.Namespace, pod.Name, err))
 			klog.Errorf("error evicting '%s/%s': %v", pod.Namespace, pod.Name, err)
 			continue
-		}
-
-		if c.opts.EvictionPause > 0 {
-			time.Sleep(c.opts.EvictionPause)
 		}
 	}
 	return nil

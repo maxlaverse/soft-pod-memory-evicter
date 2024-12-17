@@ -16,7 +16,6 @@ import (
 func main() {
 	opts := pkg.Options{
 		DryRun:                   false,
-		EvictionPause:            time.Duration(5) * time.Minute,
 		MemoryUsageCheckInterval: time.Duration(3) * time.Minute,
 		MemoryUsageThreshold:     95,
 	}
@@ -35,11 +34,6 @@ func main() {
 				Usage:       "Output additional debug lines",
 				Value:       opts.DryRun,
 				Destination: &opts.DryRun,
-			}, &cli.DurationFlag{
-				Name:        "eviction-pause",
-				Usage:       "Pause duration between evictions",
-				Value:       opts.EvictionPause,
-				Destination: &opts.EvictionPause,
 			}, &cli.DurationFlag{
 				Name:        "memory-usage-check-interval",
 				Usage:       "Interval at which the Pod metrics are checked",
