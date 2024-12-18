@@ -21,6 +21,7 @@ import (
 type testPod struct {
 	pod     corev1.Pod
 	metrics metricsv1beta1.PodMetrics
+	pdb     policyv1.PodDisruptionBudget
 }
 
 // Bellow are a list of predefined Pods which can be reused in different tests
@@ -142,6 +143,46 @@ var (
 			},
 		},
 	}
+
+	// A pod with one container that is maxed out having a PodDisruptionBudget
+	podSingleMaxedoutContainerWithPDB = testPod{
+		pod: corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod-5",
+				Namespace: "test-namespace",
+				Labels: map[string]string{
+					"app": "test-app",
+				},
+			},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					containerDefinitionWithMemoryLimit("container-1", "1Gi"),
+				},
+			},
+		},
+		metrics: metricsv1beta1.PodMetrics{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod-5",
+				Namespace: "test-namespace",
+			},
+			Containers: []metricsv1beta1.ContainerMetrics{
+				containerMetricsWithMemoryUsage("container-1", "1Gi"),
+			},
+		},
+		pdb: policyv1.PodDisruptionBudget{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod-5-pdb",
+				Namespace: "test-namespace",
+			},
+			Spec: policyv1.PodDisruptionBudgetSpec{
+				Selector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"app": "test-app",
+					},
+				},
+			},
+		},
+	}
 )
 
 func TestContainerIdentificationFailsIfContainerDefinitionCantBeFound(t *testing.T) {
@@ -250,15 +291,51 @@ func TestEvictionHasDryrunSet(t *testing.T) {
 	assert.Equal(t, "All", obj3.(*policyv1.Eviction).DeleteOptions.DryRun[0])
 }
 
-func fakeController(pairs ...testPod) *controller {
-	podDefinitions := []runtime.Object{}
+func TestEvictionAlsoWorksForPodsWithDisruptionBudget(t *testing.T) {
+	c := fakeController(podWithAllContainersAlright, podSingleMaxedoutContainerWithPDB)
+
+	err := c.evictPodsCloseToMemoryLimit(context.Background())
+	assert.NoError(t, err)
+	c.sync()
+
+	fakeClientSet := c.clientset.(*fake.Clientset)
+	assert.Equal(t, 4, len(fakeClientSet.Actions()))
+
+	action0 := fakeClientSet.Actions()[0]
+	assert.Equal(t, "list", action0.GetVerb())
+	assert.Equal(t, "/v1, Resource=pods", action0.GetResource().String())
+
+	action1 := fakeClientSet.Actions()[1]
+	assert.Equal(t, "watch", action1.GetVerb())
+	assert.Equal(t, "/v1, Resource=pods", action1.GetResource().String())
+
+	action2 := fakeClientSet.Actions()[2]
+	assert.Equal(t, "list", action2.GetVerb())
+	assert.Equal(t, "policy/v1, Resource=poddisruptionbudgets", action2.GetResource().String())
+
+	action3 := fakeClientSet.Actions()[3]
+	assert.Equal(t, "create", action3.GetVerb())
+	assert.Equal(t, "eviction", action3.GetSubresource())
+	assert.Equal(t, "/v1, Resource=pods", action3.GetResource().String())
+
+	obj2 := action3.(clientgo_testing.CreateAction).GetObject()
+	assert.Equal(t, "test-pod-5", obj2.(*policyv1.Eviction).Name)
+	assert.Equal(t, "test-namespace", obj2.(*policyv1.Eviction).Namespace)
+	assert.Nil(t, obj2.(*policyv1.Eviction).DeleteOptions)
+}
+
+func fakeController(podConfigs ...testPod) *controller {
+	k8sObjects := []runtime.Object{}
 	podMetrics := []metricsv1beta1.PodMetrics{}
-	for k := range pairs {
-		podDefinitions = append(podDefinitions, &(pairs[k].pod))
-		podMetrics = append(podMetrics, pairs[k].metrics)
+	for k := range podConfigs {
+		k8sObjects = append(k8sObjects, &(podConfigs[k].pod))
+		podMetrics = append(podMetrics, podConfigs[k].metrics)
+		if podConfigs[k].pdb.Name != "" {
+			k8sObjects = append(k8sObjects, &(podConfigs[k].pdb))
+		}
 	}
 
-	clientset := fake.NewSimpleClientset(podDefinitions...)
+	clientset := fake.NewSimpleClientset(k8sObjects...)
 	factory := informers.NewSharedInformerFactory(clientset, 0)
 	lister := factory.Core().V1().Pods().Lister()
 
@@ -284,7 +361,8 @@ func fakeController(pairs ...testPod) *controller {
 	}
 }
 
-// runs the async goroutines and ensures they are finished
+// Runs the asynchronous goroutines and ensures they complete. Workloads need to be
+// scheduled beforehand.
 func (c *controller) sync() {
 	var wg sync.WaitGroup
 	wg.Add(2)
