@@ -39,9 +39,10 @@ type Options struct {
 	// as overusing its memory.
 	MemoryUsageThreshold int
 
-	// EvictionPause is the delay we wait between two evictions, to prevent removing
-	// too many Pods at once. Else we could more easily have downtimes if Deployments
-	// don't specify a PodDisruptionBudget.
+	// EvictionPause is the delay we wait between two evictions, to prevent
+	// removing too many Pods at once. Else we could more easily have downtimes if
+	// Deployments don't specify a PodDisruptionBudget. Pods defining a
+	// PodDisruptionBudget will ignore the pause, but respecting the budget.
 	EvictionPause time.Duration
 
 	// MemoryUsageCheckInterval is how often we check the memory usage.
@@ -66,6 +67,8 @@ type controller struct {
 	clientset  kubernetes.Interface
 	recorder   record.EventRecorder
 	opts       Options
+	pauseChan  chan *corev1.Pod // eviction channel for Pods without PodDisruptionBudget
+	pdbChan    chan *corev1.Pod // eviction channel for Pods with PodDisruptionBudget
 }
 
 func NewController(opts Options) Controller {
@@ -93,6 +96,8 @@ func NewController(opts Options) Controller {
 		lister:     lister,
 		podMetrics: podMetrics,
 		factory:    factory,
+		pauseChan:  make(chan *corev1.Pod, opts.ChannelBufferSize),
+		pdbChan:    make(chan *corev1.Pod, opts.ChannelBufferSize),
 		recorder: eventBroadcaster.NewRecorder(
 			scheme.Scheme,
 			corev1.EventSource{Component: componentName},
@@ -102,8 +107,6 @@ func NewController(opts Options) Controller {
 
 func (c *controller) Run(ctx context.Context) error {
 	stopCh := make(chan struct{})
-	evictWithPauseChan := make(chan *corev1.Pod, c.opts.ChannelBufferSize) // buffered channel to avoid blocking
-	evictWithPDBChan := make(chan *corev1.Pod, c.opts.ChannelBufferSize)   // buffered channel to avoid blocking
 
 	klog.V(1).Info("1/3 Starting Factory")
 	c.factory.Start(stopCh)
@@ -112,9 +115,9 @@ func (c *controller) Run(ctx context.Context) error {
 	c.factory.WaitForCacheSync(stopCh)
 
 	klog.V(1).Info("3/3 Running initial check")
-	go c.evictWithPauseChanLoop(ctx, evictWithPauseChan)
-	go c.evictWithPDBChanLoop(ctx, evictWithPDBChan)
-	err := c.evictPodsCloseToMemoryLimit(ctx, evictWithPauseChan, evictWithPDBChan)
+	go c.evictWithPauseChanLoop(ctx)
+	go c.evictWithPDBChanLoop(ctx)
+	err := c.evictPodsCloseToMemoryLimit(ctx)
 	if err != nil {
 		return fmt.Errorf("initial check failed: %w", err)
 	}
@@ -128,15 +131,12 @@ func (c *controller) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			klog.V(0).Info("Context was cancelled, shutting down Controller!")
 			close(stopCh)
-			close(evictWithPauseChan)
-			close(evictWithPDBChan)
+			close(c.pauseChan)
+			close(c.pdbChan)
 			return nil
 
 		case <-ticker.C:
-			pauseChanUtilization := float64(len(evictWithPauseChan)) / float64(cap(evictWithPauseChan)) * 100
-			pdbChanUtilization := float64(len(evictWithPDBChan)) / float64(cap(evictWithPDBChan)) * 100
-			klog.V(0).Infof("Periodic memory usage check. Channel utilization: pause: %.1f%% - pdb: %.1f%%", pauseChanUtilization, pdbChanUtilization)
-			err := c.evictPodsCloseToMemoryLimit(ctx, evictWithPauseChan, evictWithPDBChan)
+			err := c.evictPodsCloseToMemoryLimit(ctx)
 			if err != nil {
 				klog.Errorf("periodic check failed: %v", err)
 			}
@@ -145,8 +145,8 @@ func (c *controller) Run(ctx context.Context) error {
 }
 
 // evict pods with a pause between each eviction
-func (c *controller) evictWithPauseChanLoop(ctx context.Context, evictWithPauseChan chan *corev1.Pod) {
-	for pod := range evictWithPauseChan {
+func (c *controller) evictWithPauseChanLoop(ctx context.Context) {
+	for pod := range c.pauseChan {
 		err := c.evictPod(ctx, pod)
 		if err != nil {
 			c.recorder.Event(pod.DeepCopyObject(), "Warning", "SoftEviction", fmt.Sprintf("Unable to evict Pod '%s/%s' : %v", pod.Namespace, pod.Name, err))
@@ -165,7 +165,7 @@ func (c *controller) evictWithPauseChanLoop(ctx context.Context, evictWithPauseC
 
 // evict pods having a PodDisruptionBudget. If the PDB is exceeded, the eviction
 // is retried after a delay using a different channel.
-func (c *controller) evictWithPDBChanLoop(ctx context.Context, evictWithPDBChan chan *corev1.Pod) {
+func (c *controller) evictWithPDBChanLoop(ctx context.Context) {
 	backoffChan := make(chan *corev1.Pod, c.opts.ChannelBufferSize)
 	defer close(backoffChan)
 	go func() {
@@ -189,13 +189,32 @@ func (c *controller) evictWithPDBChanLoop(ctx context.Context, evictWithPDBChan 
 		}
 	}()
 
-	for pod := range evictWithPDBChan {
+	for pod := range c.pdbChan {
 		err := c.evictPod(ctx, pod)
 		if err != nil {
 			backoffChan <- pod
 		}
 
 		klog.V(2).Infof("Pod '%s/%s' evicted", pod.Namespace, pod.Name)
+	}
+}
+
+func (c *controller) schedulePodEviction(ctx context.Context, pod *corev1.Pod) {
+	klog.V(1).Infof("Evicting Pod '%s/%s'", pod.Namespace, pod.Name)
+	c.recorder.Event(pod.DeepCopyObject(), "Normal", "SoftEviction", fmt.Sprintf("Pod '%s/%s' has at least one container close to its memory limit", pod.Namespace, pod.Name))
+
+	if c.hasDisruptionBudget(ctx, pod) {
+		if len(c.pdbChan) == cap(c.pdbChan) {
+			klog.Warningf("PDB channel is full, skipping eviction for Pod '%s/%s'", pod.Namespace, pod.Name)
+		} else {
+			c.pdbChan <- pod
+		}
+	} else {
+		if len(c.pauseChan) == cap(c.pauseChan) {
+			klog.Warningf("Pause channel is full, skipping eviction for Pod '%s/%s'", pod.Namespace, pod.Name)
+		} else {
+			c.pauseChan <- pod
+		}
 	}
 }
 
@@ -212,7 +231,7 @@ func (c *controller) evictPod(ctx context.Context, pod *corev1.Pod) error {
 	return c.clientset.PolicyV1().Evictions(pod.Namespace).Evict(ctx, &evictionPolicy)
 }
 
-func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context, evictWithPauseChan chan *corev1.Pod, evictWithPDBChan chan *corev1.Pod) error {
+func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context) error {
 	klog.V(1).Info("Starting a new Pods memory usage check")
 
 	podMetrics, err := c.podMetrics.List(ctx, metav1.ListOptions{})
@@ -235,22 +254,7 @@ func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context, evictWithP
 		}
 
 		if len(containers) > 0 {
-			klog.V(1).Infof("Evicting Pod '%s/%s'", pod.Namespace, pod.Name)
-			c.recorder.Event(pod.DeepCopyObject(), "Normal", "SoftEviction", fmt.Sprintf("Pod '%s/%s' has at least one container close to its memory limit", pod.Namespace, pod.Name))
-
-			if c.hasDisruptionBudget(ctx, pod) {
-				if len(evictWithPDBChan) == cap(evictWithPDBChan) {
-					klog.Warningf("PDB channel is full, skipping eviction for Pod '%s/%s'", pod.Namespace, pod.Name)
-				} else {
-					evictWithPDBChan <- pod
-				}
-			} else {
-				if len(evictWithPauseChan) == cap(evictWithPauseChan) {
-					klog.Warningf("Pause channel is full, skipping eviction for Pod '%s/%s'", pod.Namespace, pod.Name)
-				} else {
-					evictWithPauseChan <- pod
-				}
-			}
+			c.schedulePodEviction(ctx, pod)
 		}
 	}
 

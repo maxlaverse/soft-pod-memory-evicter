@@ -2,11 +2,12 @@ package pkg
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
-	policyv1beta1 "k8s.io/api/policy/v1beta1"
+	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -144,19 +145,19 @@ var (
 )
 
 func TestContainerIdentificationFailsIfContainerDefinitionCantBeFound(t *testing.T) {
-	_, err := identifyContainersCloseToMemoryLimit(context.Background(), podWithoutDefinition.metrics, podWithoutDefinition.pod, 60)
+	_, err := identifyContainersCloseToMemoryLimit(podWithoutDefinition.metrics, podWithoutDefinition.pod, 60)
 	assert.Error(t, err)
 	assert.EqualError(t, err, "no container definition found for 'test-namespace/test-pod/container-1'")
 }
 
 func TestContainerIdentificationIgnoresContainersWithoutLimit(t *testing.T) {
-	list, err := identifyContainersCloseToMemoryLimit(context.Background(), podWithoutLimitUsingMemory.metrics, podWithoutLimitUsingMemory.pod, 60)
+	list, err := identifyContainersCloseToMemoryLimit(podWithoutLimitUsingMemory.metrics, podWithoutLimitUsingMemory.pod, 60)
 	assert.NoError(t, err)
 	assert.Empty(t, list)
 }
 
 func TestContainerIdentificationOnlyReturnsContainersAboveRatio(t *testing.T) {
-	list, err := identifyContainersCloseToMemoryLimit(context.Background(), podWithSomeContainersAboveRatio.metrics, podWithSomeContainersAboveRatio.pod, 85)
+	list, err := identifyContainersCloseToMemoryLimit(podWithSomeContainersAboveRatio.metrics, podWithSomeContainersAboveRatio.pod, 85)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, list)
 	assert.Equal(t, []string{"container-1", "container-2"}, list)
@@ -167,9 +168,10 @@ func TestEvictionOnlyAffectsPodsMaxingoutMemory(t *testing.T) {
 
 	err := c.evictPodsCloseToMemoryLimit(context.Background())
 	assert.NoError(t, err)
+	c.sync()
 
 	fakeClientSet := c.clientset.(*fake.Clientset)
-	assert.Equal(t, 4, len(fakeClientSet.Actions()))
+	assert.Equal(t, 6, len(fakeClientSet.Actions()))
 
 	action0 := fakeClientSet.Actions()[0]
 	assert.Equal(t, "list", action0.GetVerb())
@@ -180,24 +182,32 @@ func TestEvictionOnlyAffectsPodsMaxingoutMemory(t *testing.T) {
 	assert.Equal(t, "/v1, Resource=pods", action1.GetResource().String())
 
 	action2 := fakeClientSet.Actions()[2]
-	assert.Equal(t, "create", action2.GetVerb())
-	assert.Equal(t, "eviction", action2.GetSubresource())
-	assert.Equal(t, "/v1, Resource=pods", action2.GetResource().String())
-
-	obj2 := action2.(clientgo_testing.CreateAction).GetObject()
-	assert.Equal(t, "test-pod-2", obj2.(*policyv1beta1.Eviction).Name)
-	assert.Equal(t, "test-namespace", obj2.(*policyv1beta1.Eviction).Namespace)
-	assert.Nil(t, obj2.(*policyv1beta1.Eviction).DeleteOptions)
+	assert.Equal(t, "list", action2.GetVerb())
+	assert.Equal(t, "policy/v1, Resource=poddisruptionbudgets", action2.GetResource().String())
 
 	action3 := fakeClientSet.Actions()[3]
-	assert.Equal(t, "create", action3.GetVerb())
-	assert.Equal(t, "eviction", action3.GetSubresource())
-	assert.Equal(t, "/v1, Resource=pods", action3.GetResource().String())
+	assert.Equal(t, "list", action3.GetVerb())
+	assert.Equal(t, "policy/v1, Resource=poddisruptionbudgets", action3.GetResource().String())
 
-	obj3 := action3.(clientgo_testing.CreateAction).GetObject()
-	assert.Equal(t, "test-pod-3", obj3.(*policyv1beta1.Eviction).Name)
-	assert.Equal(t, "test-namespace", obj3.(*policyv1beta1.Eviction).Namespace)
-	assert.Nil(t, obj3.(*policyv1beta1.Eviction).DeleteOptions)
+	action4 := fakeClientSet.Actions()[4]
+	assert.Equal(t, "create", action4.GetVerb())
+	assert.Equal(t, "eviction", action4.GetSubresource())
+	assert.Equal(t, "/v1, Resource=pods", action4.GetResource().String())
+
+	obj2 := action4.(clientgo_testing.CreateAction).GetObject()
+	assert.Equal(t, "test-pod-2", obj2.(*policyv1.Eviction).Name)
+	assert.Equal(t, "test-namespace", obj2.(*policyv1.Eviction).Namespace)
+	assert.Nil(t, obj2.(*policyv1.Eviction).DeleteOptions)
+
+	action5 := fakeClientSet.Actions()[5]
+	assert.Equal(t, "create", action5.GetVerb())
+	assert.Equal(t, "eviction", action5.GetSubresource())
+	assert.Equal(t, "/v1, Resource=pods", action5.GetResource().String())
+
+	obj3 := action5.(clientgo_testing.CreateAction).GetObject()
+	assert.Equal(t, "test-pod-3", obj3.(*policyv1.Eviction).Name)
+	assert.Equal(t, "test-namespace", obj3.(*policyv1.Eviction).Namespace)
+	assert.Nil(t, obj3.(*policyv1.Eviction).DeleteOptions)
 }
 
 func TestEvictionHasDryrunSet(t *testing.T) {
@@ -206,29 +216,38 @@ func TestEvictionHasDryrunSet(t *testing.T) {
 
 	err := c.evictPodsCloseToMemoryLimit(context.Background())
 	assert.NoError(t, err)
+	c.sync()
 
 	fakeClientSet := c.clientset.(*fake.Clientset)
-	assert.Equal(t, 4, len(fakeClientSet.Actions()))
+	assert.Equal(t, 6, len(fakeClientSet.Actions()))
 
 	action2 := fakeClientSet.Actions()[2]
-	assert.Equal(t, "create", action2.GetVerb())
-	assert.Equal(t, "eviction", action2.GetSubresource())
-
-	obj2 := action2.(clientgo_testing.CreateAction).GetObject()
-	assert.Equal(t, "test-pod-2", obj2.(*policyv1beta1.Eviction).Name)
-	assert.Equal(t, "test-namespace", obj2.(*policyv1beta1.Eviction).Namespace)
-	assert.Equal(t, 1, len(obj2.(*policyv1beta1.Eviction).DeleteOptions.DryRun))
-	assert.Equal(t, "All", obj2.(*policyv1beta1.Eviction).DeleteOptions.DryRun[0])
+	assert.Equal(t, "list", action2.GetVerb())
+	assert.Equal(t, "policy/v1, Resource=poddisruptionbudgets", action2.GetResource().String())
 
 	action3 := fakeClientSet.Actions()[3]
-	assert.Equal(t, "create", action3.GetVerb())
-	assert.Equal(t, "eviction", action3.GetSubresource())
+	assert.Equal(t, "list", action3.GetVerb())
+	assert.Equal(t, "policy/v1, Resource=poddisruptionbudgets", action3.GetResource().String())
 
-	obj3 := action3.(clientgo_testing.CreateAction).GetObject()
-	assert.Equal(t, "test-pod-3", obj3.(*policyv1beta1.Eviction).Name)
-	assert.Equal(t, "test-namespace", obj3.(*policyv1beta1.Eviction).Namespace)
-	assert.Equal(t, 1, len(obj3.(*policyv1beta1.Eviction).DeleteOptions.DryRun))
-	assert.Equal(t, "All", obj3.(*policyv1beta1.Eviction).DeleteOptions.DryRun[0])
+	action4 := fakeClientSet.Actions()[4]
+	assert.Equal(t, "create", action4.GetVerb())
+	assert.Equal(t, "eviction", action4.GetSubresource())
+
+	obj2 := action4.(clientgo_testing.CreateAction).GetObject()
+	assert.Equal(t, "test-pod-2", obj2.(*policyv1.Eviction).Name)
+	assert.Equal(t, "test-namespace", obj2.(*policyv1.Eviction).Namespace)
+	assert.Equal(t, 1, len(obj2.(*policyv1.Eviction).DeleteOptions.DryRun))
+	assert.Equal(t, "All", obj2.(*policyv1.Eviction).DeleteOptions.DryRun[0])
+
+	action5 := fakeClientSet.Actions()[5]
+	assert.Equal(t, "create", action5.GetVerb())
+	assert.Equal(t, "eviction", action5.GetSubresource())
+
+	obj3 := action5.(clientgo_testing.CreateAction).GetObject()
+	assert.Equal(t, "test-pod-3", obj3.(*policyv1.Eviction).Name)
+	assert.Equal(t, "test-namespace", obj3.(*policyv1.Eviction).Namespace)
+	assert.Equal(t, 1, len(obj3.(*policyv1.Eviction).DeleteOptions.DryRun))
+	assert.Equal(t, "All", obj3.(*policyv1.Eviction).DeleteOptions.DryRun[0])
 }
 
 func fakeController(pairs ...testPod) *controller {
@@ -251,6 +270,8 @@ func fakeController(pairs ...testPod) *controller {
 		clientset: clientset,
 		lister:    lister,
 		recorder:  record.NewFakeRecorder(10),
+		pauseChan: make(chan *corev1.Pod, 10),
+		pdbChan:   make(chan *corev1.Pod, 10),
 
 		// We can't use the official fake clientset for metrics because it's broken:
 		// https://github.com/kubernetes/kubernetes/issues/95421
@@ -261,6 +282,23 @@ func fakeController(pairs ...testPod) *controller {
 			MemoryUsageThreshold: 90,
 		},
 	}
+}
+
+// runs the async goroutines and ensures they are finished
+func (c *controller) sync() {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		c.evictWithPauseChanLoop(context.Background())
+		wg.Done()
+	}()
+	go func() {
+		c.evictWithPDBChanLoop(context.Background())
+		wg.Done()
+	}()
+	close(c.pauseChan)
+	close(c.pdbChan)
+	wg.Wait()
 }
 
 func containerDefinitionWithMemoryLimit(name string, memoryLimit string) corev1.Container {
