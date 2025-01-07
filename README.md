@@ -20,6 +20,14 @@ helm repo update
 helm install soft-pod-memory-evicter maxlaverse/soft-pod-memory-evicter
 ```
 
+## Annotations
+
+The controller will respect the following annotation to decide whether to evict a Pod or not:
+
+```yaml
+soft-pod-memory-evicter/eviction-allowed: "true"
+```
+
 ## Usage
 
 ```
@@ -34,6 +42,7 @@ COMMANDS:
 
 GLOBAL OPTIONS:
    --dry-run                            Output additional debug lines (default: false)
+   --strict-annotation                  Only evict Pods with the annotation 'soft-pod-memory-evicter/eviction-allowed' set to 'true' (default: false)
    --eviction-pause value               Pause duration between evictions (default: 5m0s)
    --memory-usage-check-interval value  Interval at which the Pod metrics are checked (default: 3m0s)
    --memory-usage-threshold value       Memory usage eviction threshold (0-100) (default: 95)

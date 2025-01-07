@@ -35,6 +35,10 @@ type Options struct {
 	// DryRun=true won't evict Pods for real
 	DryRun bool
 
+	// IsAnnotationRequired, if true, will only evict Pods that have the
+	// annotation `soft-pod-memory-evicter/eviction-allowed` set to `true`.
+	IsAnnotationRequired bool
+
 	// MemoryUsageThreshold is the threshold (0-100) above which a Pod is considered
 	// as overusing its memory.
 	MemoryUsageThreshold int
@@ -232,6 +236,19 @@ func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context) error {
 		if err != nil {
 			klog.Errorf("Could not find Pod definition for '%s/%s'", podMetric.Namespace, podMetric.Name)
 			continue
+		}
+
+		evictionAllowedValue, annotationExists := pod.Annotations["soft-pod-memory-evicter/eviction-allowed"]
+		if c.opts.IsAnnotationRequired {
+			if !annotationExists || evictionAllowedValue != "true" {
+				klog.V(2).Infof("Pod '%s/%s' is not allowed to be evicted", podMetric.Namespace, podMetric.Name)
+				continue
+			}
+		} else {
+			if annotationExists && evictionAllowedValue == "false" {
+				klog.V(2).Infof("Pod '%s/%s' is not allowed to be evicted", podMetric.Namespace, podMetric.Name)
+				continue
+			}
 		}
 
 		containers, err := identifyContainersCloseToMemoryLimit(podMetric, *pod, float64(c.opts.MemoryUsageThreshold))

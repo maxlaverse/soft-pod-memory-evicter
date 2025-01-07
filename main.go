@@ -16,6 +16,7 @@ import (
 func main() {
 	opts := pkg.Options{
 		DryRun:                   false,
+		IsAnnotationRequired:     false,
 		EvictionPause:            time.Duration(5) * time.Minute,
 		MemoryUsageCheckInterval: time.Duration(3) * time.Minute,
 		MemoryUsageThreshold:     95,
@@ -36,6 +37,11 @@ func main() {
 				Usage:       "Output additional debug lines",
 				Value:       opts.DryRun,
 				Destination: &opts.DryRun,
+			}, &cli.BoolFlag{
+				Name:        "strict-annotation",
+				Usage:       "Only evict Pods with the annotation 'soft-pod-memory-evicter/eviction-allowed' set to 'true'",
+				Value:       opts.IsAnnotationRequired,
+				Destination: &opts.IsAnnotationRequired,
 			}, &cli.DurationFlag{
 				Name:        "eviction-pause",
 				Usage:       "Pause duration between evictions",
