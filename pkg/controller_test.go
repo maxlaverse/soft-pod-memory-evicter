@@ -135,7 +135,7 @@ var (
 		},
 		metrics: metricsv1beta1.PodMetrics{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-pod-3",
+				Name:      "test-pod-4",
 				Namespace: "test-namespace",
 			},
 			Containers: []metricsv1beta1.ContainerMetrics{
@@ -265,7 +265,7 @@ func TestEvictionOnlyAffectsPodsMaxingoutMemory(t *testing.T) {
 	assert.Equal(t, "/v1, Resource=pods", action5.GetResource().String())
 
 	obj3 := action5.(clientgo_testing.CreateAction).GetObject()
-	assert.Equal(t, "test-pod-3", obj3.(*policyv1.Eviction).Name)
+	assert.Equal(t, "test-pod-4", obj3.(*policyv1.Eviction).Name)
 	assert.Equal(t, "test-namespace", obj3.(*policyv1.Eviction).Namespace)
 	assert.Nil(t, obj3.(*policyv1.Eviction).DeleteOptions)
 }
