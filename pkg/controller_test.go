@@ -314,10 +314,19 @@ func TestEvictionOnlyAffectsPodsMaxingoutMemoryWithAnnotationOptOut(t *testing.T
 
 	err := c.evictPodsCloseToMemoryLimit(context.Background())
 	assert.NoError(t, err)
-	c.sync()
+	c.terminate_graceful()
 
 	fakeClientSet := c.clientset.(*fake.Clientset)
-	assert.Equal(t, 4, len(fakeClientSet.Actions())) // pod, podmetrics, pdb, eviction
+	assert.Equal(t, 5, len(fakeClientSet.Actions()))
+	assertContainsAction(t, fakeClientSet.Actions(), "list", "pods")
+	assertContainsAction(t, fakeClientSet.Actions(), "watch", "pods")
+	assertContainsAction(t, fakeClientSet.Actions(), "list", "poddisruptionbudgets")
+	assertContainsAction(t, fakeClientSet.Actions(), "watch", "poddisruptionbudgets")
+
+	action4 := fakeClientSet.Actions()[4]
+	assert.Equal(t, "create", action4.GetVerb())
+	assert.Equal(t, "eviction", action4.GetSubresource())
+	assert.Equal(t, "/v1, Resource=pods", action4.GetResource().String())
 }
 
 func TestEvictionOnlyAffectsPodsMaxingoutMemoryWithAnnotationToFalseOptOut(t *testing.T) {
@@ -326,10 +335,14 @@ func TestEvictionOnlyAffectsPodsMaxingoutMemoryWithAnnotationToFalseOptOut(t *te
 
 	err := c.evictPodsCloseToMemoryLimit(context.Background())
 	assert.NoError(t, err)
-	c.sync()
+	c.terminate_graceful()
 
 	fakeClientSet := c.clientset.(*fake.Clientset)
-	assert.Equal(t, 2, len(fakeClientSet.Actions())) // pod, podmetrics (no eviction)
+	assert.Equal(t, 4, len(fakeClientSet.Actions()))
+	assertContainsAction(t, fakeClientSet.Actions(), "list", "pods")
+	assertContainsAction(t, fakeClientSet.Actions(), "watch", "pods")
+	assertContainsAction(t, fakeClientSet.Actions(), "list", "poddisruptionbudgets")
+	assertContainsAction(t, fakeClientSet.Actions(), "watch", "poddisruptionbudgets")
 }
 
 func TestEvictionOnlyAffectsPodsMaxingoutMemoryWithAnnotationOptIn(t *testing.T) {
@@ -338,10 +351,19 @@ func TestEvictionOnlyAffectsPodsMaxingoutMemoryWithAnnotationOptIn(t *testing.T)
 
 	err := c.evictPodsCloseToMemoryLimit(context.Background())
 	assert.NoError(t, err)
-	c.sync()
+	c.terminate_graceful()
 
 	fakeClientSet := c.clientset.(*fake.Clientset)
-	assert.Equal(t, 4, len(fakeClientSet.Actions())) // pod, podmetrics, pdb, eviction
+	assert.Equal(t, 5, len(fakeClientSet.Actions()))
+	assertContainsAction(t, fakeClientSet.Actions(), "list", "pods")
+	assertContainsAction(t, fakeClientSet.Actions(), "watch", "pods")
+	assertContainsAction(t, fakeClientSet.Actions(), "list", "poddisruptionbudgets")
+	assertContainsAction(t, fakeClientSet.Actions(), "watch", "poddisruptionbudgets")
+
+	action4 := fakeClientSet.Actions()[4]
+	assert.Equal(t, "create", action4.GetVerb())
+	assert.Equal(t, "eviction", action4.GetSubresource())
+	assert.Equal(t, "/v1, Resource=pods", action4.GetResource().String())
 }
 
 func TestEvictionOnlyAffectsPodsMaxingoutMemoryWithAnnotationToFalseOptIn(t *testing.T) {
@@ -350,10 +372,14 @@ func TestEvictionOnlyAffectsPodsMaxingoutMemoryWithAnnotationToFalseOptIn(t *tes
 
 	err := c.evictPodsCloseToMemoryLimit(context.Background())
 	assert.NoError(t, err)
-	c.sync()
+	c.terminate_graceful()
 
 	fakeClientSet := c.clientset.(*fake.Clientset)
-	assert.Equal(t, 2, len(fakeClientSet.Actions())) // pod, podmetrics (no eviction)
+	assert.Equal(t, 4, len(fakeClientSet.Actions()))
+	assertContainsAction(t, fakeClientSet.Actions(), "list", "pods")
+	assertContainsAction(t, fakeClientSet.Actions(), "watch", "pods")
+	assertContainsAction(t, fakeClientSet.Actions(), "list", "poddisruptionbudgets")
+	assertContainsAction(t, fakeClientSet.Actions(), "watch", "poddisruptionbudgets")
 }
 
 func TestEvictionOnlyAffectsPodsMaxingoutMemoryWithoutAnnotationToFalseOptIn(t *testing.T) {
@@ -362,10 +388,14 @@ func TestEvictionOnlyAffectsPodsMaxingoutMemoryWithoutAnnotationToFalseOptIn(t *
 
 	err := c.evictPodsCloseToMemoryLimit(context.Background())
 	assert.NoError(t, err)
-	c.sync()
+	c.terminate_graceful()
 
 	fakeClientSet := c.clientset.(*fake.Clientset)
-	assert.Equal(t, 2, len(fakeClientSet.Actions())) // pod, podmetrics (no eviction)
+	assert.Equal(t, 4, len(fakeClientSet.Actions()))
+	assertContainsAction(t, fakeClientSet.Actions(), "list", "pods")
+	assertContainsAction(t, fakeClientSet.Actions(), "watch", "pods")
+	assertContainsAction(t, fakeClientSet.Actions(), "list", "poddisruptionbudgets")
+	assertContainsAction(t, fakeClientSet.Actions(), "watch", "poddisruptionbudgets")
 }
 
 func TestEvictionAlsoWorksForPodsWithDisruptionBudget(t *testing.T) {
