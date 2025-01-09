@@ -3,7 +3,6 @@ package pkg
 import (
 	"context"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -170,33 +169,17 @@ func (c *controller) evictWithPauseChanLoop(ctx context.Context) {
 // evict pods having a PodDisruptionBudget. If the PDB is exceeded, the eviction
 // is retried after a delay using a different channel.
 func (c *controller) evictWithPDBChanLoop(ctx context.Context) {
-	backoffChan := make(chan *corev1.Pod, c.opts.ChannelQueueSize)
-	defer close(backoffChan)
-	go func() {
-		for pod := range backoffChan {
-			attempt := 1
-		retry:
-			klog.V(2).Infof("Retrying eviction of '%s/%s' (attempt %d)", pod.Namespace, pod.Name, attempt)
-			err := c.evictPod(ctx, pod)
-			if err != nil {
-				if strings.Contains(err.Error(), "disruption budget") && attempt <= 3 {
-					time.Sleep(time.Duration(math.Pow(5, float64(attempt))) * time.Second)
-					attempt++
-					goto retry
-				}
-				c.recorder.Event(pod.DeepCopyObject(), "Warning", "SoftEviction", fmt.Sprintf("Unable to evict Pod '%s/%s' : %v", pod.Namespace, pod.Name, err))
-				klog.Errorf("error evicting '%s/%s': %v", pod.Namespace, pod.Name, err)
-				continue
-			}
-
-			klog.V(2).Infof("Pod '%s/%s' evicted", pod.Namespace, pod.Name)
-		}
-	}()
-
 	for pod := range c.pdbChan {
 		err := c.evictPod(ctx, pod)
 		if err != nil {
-			backoffChan <- pod
+			if strings.Contains(err.Error(), "disruption budget") {
+				klog.V(2).Infof("Disruption budget exceeded. Skipping '%s/%s' this interval.", pod.Namespace, pod.Name)
+				continue
+			}
+
+			c.recorder.Event(pod.DeepCopyObject(), "Warning", "SoftEviction", fmt.Sprintf("Unable to evict Pod '%s/%s' : %v", pod.Namespace, pod.Name, err))
+			klog.Errorf("error evicting '%s/%s': %v", pod.Namespace, pod.Name, err)
+			continue
 		}
 
 		klog.V(2).Infof("Pod '%s/%s' evicted", pod.Namespace, pod.Name)
