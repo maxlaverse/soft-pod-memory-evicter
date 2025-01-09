@@ -2,11 +2,12 @@ package pkg
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
-	policyv1beta1 "k8s.io/api/policy/v1beta1"
+	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -20,6 +21,7 @@ import (
 type testPod struct {
 	pod     corev1.Pod
 	metrics metricsv1beta1.PodMetrics
+	pdb     policyv1.PodDisruptionBudget
 }
 
 // Bellow are a list of predefined Pods which can be reused in different tests
@@ -141,22 +143,62 @@ var (
 			},
 		},
 	}
+
+	// A pod with one container that is maxed out having a PodDisruptionBudget
+	podSingleMaxedoutContainerWithPDB = testPod{
+		pod: corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod-5",
+				Namespace: "test-namespace",
+				Labels: map[string]string{
+					"app": "test-app",
+				},
+			},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					containerDefinitionWithMemoryLimit("container-1", "1Gi"),
+				},
+			},
+		},
+		metrics: metricsv1beta1.PodMetrics{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod-5",
+				Namespace: "test-namespace",
+			},
+			Containers: []metricsv1beta1.ContainerMetrics{
+				containerMetricsWithMemoryUsage("container-1", "1Gi"),
+			},
+		},
+		pdb: policyv1.PodDisruptionBudget{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod-5-pdb",
+				Namespace: "test-namespace",
+			},
+			Spec: policyv1.PodDisruptionBudgetSpec{
+				Selector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"app": "test-app",
+					},
+				},
+			},
+		},
+	}
 )
 
 func TestContainerIdentificationFailsIfContainerDefinitionCantBeFound(t *testing.T) {
-	_, err := identifyContainersCloseToMemoryLimit(context.Background(), podWithoutDefinition.metrics, podWithoutDefinition.pod, 60)
+	_, err := identifyContainersCloseToMemoryLimit(podWithoutDefinition.metrics, podWithoutDefinition.pod, 60)
 	assert.Error(t, err)
 	assert.EqualError(t, err, "no container definition found for 'test-namespace/test-pod/container-1'")
 }
 
 func TestContainerIdentificationIgnoresContainersWithoutLimit(t *testing.T) {
-	list, err := identifyContainersCloseToMemoryLimit(context.Background(), podWithoutLimitUsingMemory.metrics, podWithoutLimitUsingMemory.pod, 60)
+	list, err := identifyContainersCloseToMemoryLimit(podWithoutLimitUsingMemory.metrics, podWithoutLimitUsingMemory.pod, 60)
 	assert.NoError(t, err)
 	assert.Empty(t, list)
 }
 
 func TestContainerIdentificationOnlyReturnsContainersAboveRatio(t *testing.T) {
-	list, err := identifyContainersCloseToMemoryLimit(context.Background(), podWithSomeContainersAboveRatio.metrics, podWithSomeContainersAboveRatio.pod, 85)
+	list, err := identifyContainersCloseToMemoryLimit(podWithSomeContainersAboveRatio.metrics, podWithSomeContainersAboveRatio.pod, 85)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, list)
 	assert.Equal(t, []string{"container-1", "container-2"}, list)
@@ -167,37 +209,36 @@ func TestEvictionOnlyAffectsPodsMaxingoutMemory(t *testing.T) {
 
 	err := c.evictPodsCloseToMemoryLimit(context.Background())
 	assert.NoError(t, err)
+	c.terminate_graceful()
 
 	fakeClientSet := c.clientset.(*fake.Clientset)
-	assert.Equal(t, 4, len(fakeClientSet.Actions()))
+	assert.Equal(t, 6, len(fakeClientSet.Actions()))
 
-	action0 := fakeClientSet.Actions()[0]
-	assert.Equal(t, "list", action0.GetVerb())
-	assert.Equal(t, "/v1, Resource=pods", action0.GetResource().String())
+	first_four_actions := fakeClientSet.Actions()[:4]
+	assertContainsAction(t, first_four_actions, "list", "pods")
+	assertContainsAction(t, first_four_actions, "watch", "pods")
+	assertContainsAction(t, first_four_actions, "list", "poddisruptionbudgets")
+	assertContainsAction(t, first_four_actions, "watch", "poddisruptionbudgets")
 
-	action1 := fakeClientSet.Actions()[1]
-	assert.Equal(t, "watch", action1.GetVerb())
-	assert.Equal(t, "/v1, Resource=pods", action1.GetResource().String())
+	action4 := fakeClientSet.Actions()[4]
+	assert.Equal(t, "create", action4.GetVerb())
+	assert.Equal(t, "eviction", action4.GetSubresource())
+	assert.Equal(t, "/v1, Resource=pods", action4.GetResource().String())
 
-	action2 := fakeClientSet.Actions()[2]
-	assert.Equal(t, "create", action2.GetVerb())
-	assert.Equal(t, "eviction", action2.GetSubresource())
-	assert.Equal(t, "/v1, Resource=pods", action2.GetResource().String())
+	obj2 := action4.(clientgo_testing.CreateAction).GetObject()
+	assert.Equal(t, "test-pod-2", obj2.(*policyv1.Eviction).Name)
+	assert.Equal(t, "test-namespace", obj2.(*policyv1.Eviction).Namespace)
+	assert.Nil(t, obj2.(*policyv1.Eviction).DeleteOptions)
 
-	obj2 := action2.(clientgo_testing.CreateAction).GetObject()
-	assert.Equal(t, "test-pod-2", obj2.(*policyv1beta1.Eviction).Name)
-	assert.Equal(t, "test-namespace", obj2.(*policyv1beta1.Eviction).Namespace)
-	assert.Nil(t, obj2.(*policyv1beta1.Eviction).DeleteOptions)
+	action5 := fakeClientSet.Actions()[5]
+	assert.Equal(t, "create", action5.GetVerb())
+	assert.Equal(t, "eviction", action5.GetSubresource())
+	assert.Equal(t, "/v1, Resource=pods", action5.GetResource().String())
 
-	action3 := fakeClientSet.Actions()[3]
-	assert.Equal(t, "create", action3.GetVerb())
-	assert.Equal(t, "eviction", action3.GetSubresource())
-	assert.Equal(t, "/v1, Resource=pods", action3.GetResource().String())
-
-	obj3 := action3.(clientgo_testing.CreateAction).GetObject()
-	assert.Equal(t, "test-pod-3", obj3.(*policyv1beta1.Eviction).Name)
-	assert.Equal(t, "test-namespace", obj3.(*policyv1beta1.Eviction).Namespace)
-	assert.Nil(t, obj3.(*policyv1beta1.Eviction).DeleteOptions)
+	obj3 := action5.(clientgo_testing.CreateAction).GetObject()
+	assert.Equal(t, "test-pod-3", obj3.(*policyv1.Eviction).Name)
+	assert.Equal(t, "test-namespace", obj3.(*policyv1.Eviction).Namespace)
+	assert.Nil(t, obj3.(*policyv1.Eviction).DeleteOptions)
 }
 
 func TestEvictionHasDryrunSet(t *testing.T) {
@@ -206,42 +247,80 @@ func TestEvictionHasDryrunSet(t *testing.T) {
 
 	err := c.evictPodsCloseToMemoryLimit(context.Background())
 	assert.NoError(t, err)
+	c.terminate_graceful()
 
 	fakeClientSet := c.clientset.(*fake.Clientset)
-	assert.Equal(t, 4, len(fakeClientSet.Actions()))
+	assert.Equal(t, 6, len(fakeClientSet.Actions()))
 
-	action2 := fakeClientSet.Actions()[2]
-	assert.Equal(t, "create", action2.GetVerb())
-	assert.Equal(t, "eviction", action2.GetSubresource())
+	first_four_actions := fakeClientSet.Actions()[:4]
+	assertContainsAction(t, first_four_actions, "list", "pods")
+	assertContainsAction(t, first_four_actions, "watch", "pods")
+	assertContainsAction(t, first_four_actions, "list", "poddisruptionbudgets")
+	assertContainsAction(t, first_four_actions, "watch", "poddisruptionbudgets")
 
-	obj2 := action2.(clientgo_testing.CreateAction).GetObject()
-	assert.Equal(t, "test-pod-2", obj2.(*policyv1beta1.Eviction).Name)
-	assert.Equal(t, "test-namespace", obj2.(*policyv1beta1.Eviction).Namespace)
-	assert.Equal(t, 1, len(obj2.(*policyv1beta1.Eviction).DeleteOptions.DryRun))
-	assert.Equal(t, "All", obj2.(*policyv1beta1.Eviction).DeleteOptions.DryRun[0])
+	action4 := fakeClientSet.Actions()[4]
+	assert.Equal(t, "create", action4.GetVerb())
+	assert.Equal(t, "eviction", action4.GetSubresource())
 
-	action3 := fakeClientSet.Actions()[3]
-	assert.Equal(t, "create", action3.GetVerb())
-	assert.Equal(t, "eviction", action3.GetSubresource())
+	obj2 := action4.(clientgo_testing.CreateAction).GetObject()
+	assert.Equal(t, "test-pod-2", obj2.(*policyv1.Eviction).Name)
+	assert.Equal(t, "test-namespace", obj2.(*policyv1.Eviction).Namespace)
+	assert.Equal(t, 1, len(obj2.(*policyv1.Eviction).DeleteOptions.DryRun))
+	assert.Equal(t, "All", obj2.(*policyv1.Eviction).DeleteOptions.DryRun[0])
 
-	obj3 := action3.(clientgo_testing.CreateAction).GetObject()
-	assert.Equal(t, "test-pod-3", obj3.(*policyv1beta1.Eviction).Name)
-	assert.Equal(t, "test-namespace", obj3.(*policyv1beta1.Eviction).Namespace)
-	assert.Equal(t, 1, len(obj3.(*policyv1beta1.Eviction).DeleteOptions.DryRun))
-	assert.Equal(t, "All", obj3.(*policyv1beta1.Eviction).DeleteOptions.DryRun[0])
+	action5 := fakeClientSet.Actions()[5]
+	assert.Equal(t, "create", action5.GetVerb())
+	assert.Equal(t, "eviction", action5.GetSubresource())
+
+	obj3 := action5.(clientgo_testing.CreateAction).GetObject()
+	assert.Equal(t, "test-pod-3", obj3.(*policyv1.Eviction).Name)
+	assert.Equal(t, "test-namespace", obj3.(*policyv1.Eviction).Namespace)
+	assert.Equal(t, 1, len(obj3.(*policyv1.Eviction).DeleteOptions.DryRun))
+	assert.Equal(t, "All", obj3.(*policyv1.Eviction).DeleteOptions.DryRun[0])
 }
 
-func fakeController(pairs ...testPod) *controller {
-	podDefinitions := []runtime.Object{}
+func TestEvictionAlsoWorksForPodsWithDisruptionBudget(t *testing.T) {
+	c := fakeController(podWithAllContainersAlright, podSingleMaxedoutContainerWithPDB)
+
+	err := c.evictPodsCloseToMemoryLimit(context.Background())
+	assert.NoError(t, err)
+	c.terminate_graceful()
+
+	fakeClientSet := c.clientset.(*fake.Clientset)
+	assert.Equal(t, 5, len(fakeClientSet.Actions()))
+
+	first_four_actions := fakeClientSet.Actions()[:4]
+	assertContainsAction(t, first_four_actions, "list", "pods")
+	assertContainsAction(t, first_four_actions, "watch", "pods")
+	assertContainsAction(t, first_four_actions, "list", "poddisruptionbudgets")
+	assertContainsAction(t, first_four_actions, "watch", "poddisruptionbudgets")
+
+	action4 := fakeClientSet.Actions()[4]
+	assert.Equal(t, "create", action4.GetVerb())
+	assert.Equal(t, "eviction", action4.GetSubresource())
+	assert.Equal(t, "/v1, Resource=pods", action4.GetResource().String())
+
+	obj2 := action4.(clientgo_testing.CreateAction).GetObject()
+	assert.Equal(t, "test-pod-5", obj2.(*policyv1.Eviction).Name)
+	assert.Equal(t, "test-namespace", obj2.(*policyv1.Eviction).Namespace)
+	assert.Nil(t, obj2.(*policyv1.Eviction).DeleteOptions)
+}
+
+func fakeController(podConfigs ...testPod) *controller {
+	k8sObjects := []runtime.Object{}
 	podMetrics := []metricsv1beta1.PodMetrics{}
-	for k := range pairs {
-		podDefinitions = append(podDefinitions, &(pairs[k].pod))
-		podMetrics = append(podMetrics, pairs[k].metrics)
+	for k := range podConfigs {
+		k8sObjects = append(k8sObjects, &(podConfigs[k].pod))
+		podMetrics = append(podMetrics, podConfigs[k].metrics)
+		if podConfigs[k].pdb.Name != "" {
+			k8sObjects = append(k8sObjects, &(podConfigs[k].pdb))
+		}
 	}
 
-	clientset := fake.NewSimpleClientset(podDefinitions...)
+	clientset := fake.NewSimpleClientset(k8sObjects...)
 	factory := informers.NewSharedInformerFactory(clientset, 0)
 	lister := factory.Core().V1().Pods().Lister()
+	pdbLister := factory.Policy().V1().PodDisruptionBudgets().Lister()
 
 	stopCh := make(chan struct{})
 	factory.Start(stopCh)
@@ -250,7 +329,10 @@ func fakeController(pairs ...testPod) *controller {
 	return &controller{
 		clientset: clientset,
 		lister:    lister,
+		pdbLister: pdbLister,
 		recorder:  record.NewFakeRecorder(10),
+		pauseChan: make(chan *corev1.Pod, 10),
+		pdbChan:   make(chan *corev1.Pod, 10),
 
 		// We can't use the official fake clientset for metrics because it's broken:
 		// https://github.com/kubernetes/kubernetes/issues/95421
@@ -261,6 +343,22 @@ func fakeController(pairs ...testPod) *controller {
 			MemoryUsageThreshold: 90,
 		},
 	}
+}
+
+func (c *controller) terminate_graceful() {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		c.evictWithPauseChanLoop(context.Background())
+		wg.Done()
+	}()
+	go func() {
+		c.evictWithPDBChanLoop(context.Background())
+		wg.Done()
+	}()
+	close(c.pauseChan)
+	close(c.pdbChan)
+	wg.Wait()
 }
 
 func containerDefinitionWithMemoryLimit(name string, memoryLimit string) corev1.Container {
@@ -293,6 +391,17 @@ func container(name string) corev1.Container {
 	return corev1.Container{
 		Name: name,
 	}
+}
+
+func assertContainsAction(t *testing.T, actions []clientgo_testing.Action, verb, resource string) bool {
+	t.Helper()
+	for _, action := range actions {
+		if action.Matches(verb, resource) {
+			return true
+		}
+	}
+	t.Errorf("Action not found: %s %s", verb, resource)
+	return false
 }
 
 type dummyPodMetricLister struct {

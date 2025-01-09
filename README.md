@@ -9,8 +9,8 @@ A Kubernetes Controller that evicts Pods when they're reaching their memory limi
 ## Supported Versions
 
 The controller has been tested and built with the following components:
-* Kubernetes >= 1.19
-* Metric Server >= 0.5.0
+* Kubernetes >= 1.28
+* Metric Server >= 0.7.1
 
 ## Installation
 
@@ -18,6 +18,28 @@ The controller has been tested and built with the following components:
 helm repo add maxlaverse https://maxlaverse.github.io/helm-charts/
 helm repo update
 helm install soft-pod-memory-evicter maxlaverse/soft-pod-memory-evicter
+```
+
+## Usage
+
+```
+NAME:
+   soft-pod-memory-evicter - Gracefully evict Pods before they get OOM killed
+
+USAGE:
+   soft-pod-memory-evicter [global options] command [command options]
+
+COMMANDS:
+   help, h  Shows a list of commands or help for one command
+
+GLOBAL OPTIONS:
+   --dry-run                            Output additional debug lines (default: false)
+   --eviction-pause value               Pause duration between evictions (default: 5m0s)
+   --memory-usage-check-interval value  Interval at which the Pod metrics are checked (default: 3m0s)
+   --memory-usage-threshold value       Memory usage eviction threshold (0-100) (default: 95)
+   --channel-queue-size value           Size of the queue for pod eviction (default: 100)
+   --loglevel value, -v value           Log Level (default: 0)
+   --help, -h                           show help
 ```
 
 ## License
