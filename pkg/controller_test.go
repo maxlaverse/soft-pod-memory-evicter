@@ -209,7 +209,7 @@ func TestEvictionOnlyAffectsPodsMaxingoutMemory(t *testing.T) {
 
 	err := c.evictPodsCloseToMemoryLimit(context.Background())
 	assert.NoError(t, err)
-	c.sync()
+	c.terminate_graceful()
 
 	fakeClientSet := c.clientset.(*fake.Clientset)
 	assert.Equal(t, 6, len(fakeClientSet.Actions()))
@@ -257,7 +257,7 @@ func TestEvictionHasDryrunSet(t *testing.T) {
 
 	err := c.evictPodsCloseToMemoryLimit(context.Background())
 	assert.NoError(t, err)
-	c.sync()
+	c.terminate_graceful()
 
 	fakeClientSet := c.clientset.(*fake.Clientset)
 	assert.Equal(t, 6, len(fakeClientSet.Actions()))
@@ -296,7 +296,7 @@ func TestEvictionAlsoWorksForPodsWithDisruptionBudget(t *testing.T) {
 
 	err := c.evictPodsCloseToMemoryLimit(context.Background())
 	assert.NoError(t, err)
-	c.sync()
+	c.terminate_graceful()
 
 	fakeClientSet := c.clientset.(*fake.Clientset)
 	assert.Equal(t, 4, len(fakeClientSet.Actions()))
@@ -361,9 +361,7 @@ func fakeController(podConfigs ...testPod) *controller {
 	}
 }
 
-// Runs the asynchronous goroutines and ensures they complete. Workloads need to be
-// scheduled beforehand.
-func (c *controller) sync() {
+func (c *controller) terminate_graceful() {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
