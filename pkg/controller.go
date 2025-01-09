@@ -51,10 +51,10 @@ type Options struct {
 	// to refresh the metrics all the time.
 	MemoryUsageCheckInterval time.Duration
 
-	// ChannelBufferSize is the size of the buffer for Pods to evict.
+	// ChannelQueueSize is the size of the queue for Pods to evict.
 	// It is filled each check interval and drained by the eviction loops. Eviction
-	// pauses and backoffs cause the buffer to fill up.
-	ChannelBufferSize int
+	// pauses and backoffs cause the queue to fill up.
+	ChannelQueueSize int
 }
 
 type PodMetricsInterfaceList interface {
@@ -100,8 +100,8 @@ func NewController(opts Options) Controller {
 		pdbLister:  pdbLister,
 		podMetrics: podMetrics,
 		factory:    factory,
-		pauseChan:  make(chan *corev1.Pod, opts.ChannelBufferSize),
-		pdbChan:    make(chan *corev1.Pod, opts.ChannelBufferSize),
+		pauseChan:  make(chan *corev1.Pod, opts.ChannelQueueSize),
+		pdbChan:    make(chan *corev1.Pod, opts.ChannelQueueSize),
 		recorder: eventBroadcaster.NewRecorder(
 			scheme.Scheme,
 			corev1.EventSource{Component: componentName},
@@ -170,7 +170,7 @@ func (c *controller) evictWithPauseChanLoop(ctx context.Context) {
 // evict pods having a PodDisruptionBudget. If the PDB is exceeded, the eviction
 // is retried after a delay using a different channel.
 func (c *controller) evictWithPDBChanLoop(ctx context.Context) {
-	backoffChan := make(chan *corev1.Pod, c.opts.ChannelBufferSize)
+	backoffChan := make(chan *corev1.Pod, c.opts.ChannelQueueSize)
 	defer close(backoffChan)
 	go func() {
 		for pod := range backoffChan {
