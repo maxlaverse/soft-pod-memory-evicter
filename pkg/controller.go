@@ -200,7 +200,7 @@ func (c *controller) evictWithPDBChanLoop(ctx context.Context) {
 }
 
 func (c *controller) schedulePodEviction(ctx context.Context, pod *corev1.Pod) {
-	klog.V(1).Infof("Evicting Pod '%s/%s'", pod.Namespace, pod.Name)
+	klog.V(1).Infof("Scheduling eviction for Pod '%s/%s'", pod.Namespace, pod.Name)
 	c.recorder.Event(pod.DeepCopyObject(), "Normal", "SoftEviction", fmt.Sprintf("Pod '%s/%s' has at least one container close to its memory limit", pod.Namespace, pod.Name))
 
 	if c.hasDisruptionBudget(ctx, pod) {
