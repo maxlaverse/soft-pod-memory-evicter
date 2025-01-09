@@ -214,21 +214,11 @@ func TestEvictionOnlyAffectsPodsMaxingoutMemory(t *testing.T) {
 	fakeClientSet := c.clientset.(*fake.Clientset)
 	assert.Equal(t, 6, len(fakeClientSet.Actions()))
 
-	action0 := fakeClientSet.Actions()[0]
-	assert.Equal(t, "list", action0.GetVerb())
-	assert.Equal(t, "/v1, Resource=pods", action0.GetResource().String())
-
-	action1 := fakeClientSet.Actions()[1]
-	assert.Equal(t, "watch", action1.GetVerb())
-	assert.Equal(t, "/v1, Resource=pods", action1.GetResource().String())
-
-	action2 := fakeClientSet.Actions()[2]
-	assert.Equal(t, "list", action2.GetVerb())
-	assert.Equal(t, "policy/v1, Resource=poddisruptionbudgets", action2.GetResource().String())
-
-	action3 := fakeClientSet.Actions()[3]
-	assert.Equal(t, "list", action3.GetVerb())
-	assert.Equal(t, "policy/v1, Resource=poddisruptionbudgets", action3.GetResource().String())
+	first_four_actions := fakeClientSet.Actions()[:4]
+	assertContainsAction(t, first_four_actions, "list", "pods")
+	assertContainsAction(t, first_four_actions, "watch", "pods")
+	assertContainsAction(t, first_four_actions, "list", "poddisruptionbudgets")
+	assertContainsAction(t, first_four_actions, "watch", "poddisruptionbudgets")
 
 	action4 := fakeClientSet.Actions()[4]
 	assert.Equal(t, "create", action4.GetVerb())
@@ -262,13 +252,11 @@ func TestEvictionHasDryrunSet(t *testing.T) {
 	fakeClientSet := c.clientset.(*fake.Clientset)
 	assert.Equal(t, 6, len(fakeClientSet.Actions()))
 
-	action2 := fakeClientSet.Actions()[2]
-	assert.Equal(t, "list", action2.GetVerb())
-	assert.Equal(t, "policy/v1, Resource=poddisruptionbudgets", action2.GetResource().String())
-
-	action3 := fakeClientSet.Actions()[3]
-	assert.Equal(t, "list", action3.GetVerb())
-	assert.Equal(t, "policy/v1, Resource=poddisruptionbudgets", action3.GetResource().String())
+	first_four_actions := fakeClientSet.Actions()[:4]
+	assertContainsAction(t, first_four_actions, "list", "pods")
+	assertContainsAction(t, first_four_actions, "watch", "pods")
+	assertContainsAction(t, first_four_actions, "list", "poddisruptionbudgets")
+	assertContainsAction(t, first_four_actions, "watch", "poddisruptionbudgets")
 
 	action4 := fakeClientSet.Actions()[4]
 	assert.Equal(t, "create", action4.GetVerb())
@@ -299,26 +287,20 @@ func TestEvictionAlsoWorksForPodsWithDisruptionBudget(t *testing.T) {
 	c.terminate_graceful()
 
 	fakeClientSet := c.clientset.(*fake.Clientset)
-	assert.Equal(t, 4, len(fakeClientSet.Actions()))
+	assert.Equal(t, 5, len(fakeClientSet.Actions()))
 
-	action0 := fakeClientSet.Actions()[0]
-	assert.Equal(t, "list", action0.GetVerb())
-	assert.Equal(t, "/v1, Resource=pods", action0.GetResource().String())
+	first_four_actions := fakeClientSet.Actions()[:4]
+	assertContainsAction(t, first_four_actions, "list", "pods")
+	assertContainsAction(t, first_four_actions, "watch", "pods")
+	assertContainsAction(t, first_four_actions, "list", "poddisruptionbudgets")
+	assertContainsAction(t, first_four_actions, "watch", "poddisruptionbudgets")
 
-	action1 := fakeClientSet.Actions()[1]
-	assert.Equal(t, "watch", action1.GetVerb())
-	assert.Equal(t, "/v1, Resource=pods", action1.GetResource().String())
+	action4 := fakeClientSet.Actions()[4]
+	assert.Equal(t, "create", action4.GetVerb())
+	assert.Equal(t, "eviction", action4.GetSubresource())
+	assert.Equal(t, "/v1, Resource=pods", action4.GetResource().String())
 
-	action2 := fakeClientSet.Actions()[2]
-	assert.Equal(t, "list", action2.GetVerb())
-	assert.Equal(t, "policy/v1, Resource=poddisruptionbudgets", action2.GetResource().String())
-
-	action3 := fakeClientSet.Actions()[3]
-	assert.Equal(t, "create", action3.GetVerb())
-	assert.Equal(t, "eviction", action3.GetSubresource())
-	assert.Equal(t, "/v1, Resource=pods", action3.GetResource().String())
-
-	obj2 := action3.(clientgo_testing.CreateAction).GetObject()
+	obj2 := action4.(clientgo_testing.CreateAction).GetObject()
 	assert.Equal(t, "test-pod-5", obj2.(*policyv1.Eviction).Name)
 	assert.Equal(t, "test-namespace", obj2.(*policyv1.Eviction).Namespace)
 	assert.Nil(t, obj2.(*policyv1.Eviction).DeleteOptions)
@@ -338,6 +320,7 @@ func fakeController(podConfigs ...testPod) *controller {
 	clientset := fake.NewSimpleClientset(k8sObjects...)
 	factory := informers.NewSharedInformerFactory(clientset, 0)
 	lister := factory.Core().V1().Pods().Lister()
+	pdbLister := factory.Policy().V1().PodDisruptionBudgets().Lister()
 
 	stopCh := make(chan struct{})
 	factory.Start(stopCh)
@@ -346,6 +329,7 @@ func fakeController(podConfigs ...testPod) *controller {
 	return &controller{
 		clientset: clientset,
 		lister:    lister,
+		pdbLister: pdbLister,
 		recorder:  record.NewFakeRecorder(10),
 		pauseChan: make(chan *corev1.Pod, 10),
 		pdbChan:   make(chan *corev1.Pod, 10),
@@ -407,6 +391,17 @@ func container(name string) corev1.Container {
 	return corev1.Container{
 		Name: name,
 	}
+}
+
+func assertContainsAction(t *testing.T, actions []clientgo_testing.Action, verb, resource string) bool {
+	t.Helper()
+	for _, action := range actions {
+		if action.Matches(verb, resource) {
+			return true
+		}
+	}
+	t.Errorf("Action not found: %s %s", verb, resource)
+	return false
 }
 
 type dummyPodMetricLister struct {

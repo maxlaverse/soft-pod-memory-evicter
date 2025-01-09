@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	corev1_typed "k8s.io/client-go/kubernetes/typed/core/v1"
 	corev1_lister "k8s.io/client-go/listers/core/v1"
+	policyv1_lister "k8s.io/client-go/listers/policy/v1"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
@@ -62,6 +63,7 @@ type PodMetricsInterfaceList interface {
 
 type controller struct {
 	lister     corev1_lister.PodLister
+	pdbLister  policyv1_lister.PodDisruptionBudgetLister
 	podMetrics PodMetricsInterfaceList
 	factory    informers.SharedInformerFactory
 	clientset  kubernetes.Interface
@@ -79,6 +81,7 @@ func NewController(opts Options) Controller {
 
 	factory := informers.NewSharedInformerFactory(clientset, 0)
 	lister := factory.Core().V1().Pods().Lister()
+	pdbLister := factory.Policy().V1().PodDisruptionBudgets().Lister()
 
 	metricsClientset, err := metrics_client.NewForConfig(Configset())
 	if err != nil {
@@ -94,6 +97,7 @@ func NewController(opts Options) Controller {
 		clientset:  clientset,
 		opts:       opts,
 		lister:     lister,
+		pdbLister:  pdbLister,
 		podMetrics: podMetrics,
 		factory:    factory,
 		pauseChan:  make(chan *corev1.Pod, opts.ChannelBufferSize),
@@ -199,11 +203,11 @@ func (c *controller) evictWithPDBChanLoop(ctx context.Context) {
 	}
 }
 
-func (c *controller) schedulePodEviction(ctx context.Context, pod *corev1.Pod) {
+func (c *controller) schedulePodEviction(pod *corev1.Pod) {
 	klog.V(1).Infof("Scheduling eviction for Pod '%s/%s'", pod.Namespace, pod.Name)
 	c.recorder.Event(pod.DeepCopyObject(), "Normal", "SoftEviction", fmt.Sprintf("Pod '%s/%s' has at least one container close to its memory limit", pod.Namespace, pod.Name))
 
-	if c.hasDisruptionBudget(ctx, pod) {
+	if c.hasDisruptionBudget(pod) {
 		if len(c.pdbChan) == cap(c.pdbChan) {
 			klog.Warningf("PDB channel is full, skipping eviction for Pod '%s/%s'", pod.Namespace, pod.Name)
 		} else {
@@ -254,7 +258,7 @@ func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context) error {
 		}
 
 		if len(containers) > 0 {
-			c.schedulePodEviction(ctx, pod)
+			c.schedulePodEviction(pod)
 		}
 	}
 
@@ -298,14 +302,14 @@ func identifyContainersCloseToMemoryLimit(podMetrics metricsv1beta1.PodMetrics, 
 	return containerOverConsuming, nil
 }
 
-func (c *controller) hasDisruptionBudget(ctx context.Context, pod *corev1.Pod) bool {
-	pdbList, err := c.clientset.PolicyV1().PodDisruptionBudgets(pod.Namespace).List(ctx, metav1.ListOptions{})
+func (c *controller) hasDisruptionBudget(pod *corev1.Pod) bool {
+	pdbList, err := c.pdbLister.PodDisruptionBudgets(pod.Namespace).List(labels.Everything())
 	if err != nil {
 		klog.Errorf("unable to list PodDisruptionBudgets: %s", err)
 		return false
 	}
 
-	for _, pdb := range pdbList.Items {
+	for _, pdb := range pdbList {
 		selector, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)
 		if err != nil {
 			klog.Errorf("unable to convert label selector: %s", err)
