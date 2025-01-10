@@ -20,6 +20,7 @@ func main() {
 		MemoryUsageCheckInterval: time.Duration(3) * time.Minute,
 		MemoryUsageThreshold:     95,
 		ChannelQueueSize:         100,
+		IgnoredNamespaces:        *cli.NewStringSlice(),
 	}
 
 	app := &cli.App{
@@ -56,7 +57,13 @@ func main() {
 				Usage:       "Size of the queue for pod eviction",
 				Value:       opts.ChannelQueueSize,
 				Destination: &opts.ChannelQueueSize,
-			}, &cli.IntFlag{
+			}, &cli.StringSliceFlag{
+				Name:        "ignore-namespace",
+				Usage:       "Do not evict Pods from this namespace. Can be used multiple times",
+				Value:       &opts.IgnoredNamespaces,
+				Destination: &opts.IgnoredNamespaces,
+			},
+			&cli.IntFlag{
 				Name:    "loglevel",
 				Aliases: []string{"v"},
 				Usage:   "Log Level",

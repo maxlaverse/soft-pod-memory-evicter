@@ -3,9 +3,11 @@ package pkg
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/urfave/cli/v2"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -54,6 +56,9 @@ type Options struct {
 	// It is filled each check interval and drained by the eviction loops. Eviction
 	// pauses and backoffs cause the queue to fill up.
 	ChannelQueueSize int
+
+	// IgnoredNamespaces is a list of namespaces to ignore when checking Pods.
+	IgnoredNamespaces cli.StringSlice
 }
 
 type PodMetricsInterfaceList interface {
@@ -228,6 +233,11 @@ func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context) error {
 
 	for _, podMetric := range podMetrics.Items {
 		klog.V(2).Infof("Checking Pod '%s/%s'", podMetric.Namespace, podMetric.Name)
+		if slices.Contains(c.opts.IgnoredNamespaces.Value(), podMetric.Namespace) {
+			klog.V(2).Infof("Pod '%s/%s' is in an ignored namespace, skipping", podMetric.Namespace, podMetric.Name)
+			continue
+		}
+
 		pod, err := c.lister.Pods(podMetric.Namespace).Get(podMetric.Name)
 		if err != nil {
 			klog.Errorf("Could not find Pod definition for '%s/%s'", podMetric.Namespace, podMetric.Name)
