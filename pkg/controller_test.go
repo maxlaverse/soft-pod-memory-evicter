@@ -10,6 +10,7 @@ import (
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
@@ -145,32 +146,30 @@ var (
 	}
 
 	// A Pod with one container that is maxed out having the annotation
-	podSingleMaxedoutContainerWithAnnotation = func(annotationValue string) testPod {
-		return testPod{
-			pod: corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pod-4",
-					Namespace: "test-namespace",
-					Annotations: map[string]string{
-						"soft-pod-memory-evicter/eviction-allowed": annotationValue,
-					},
-				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						containerDefinitionWithMemoryLimit("container-1", "1Gi"),
-					},
+	podSingleMaxedoutContainerWithAnnotation = testPod{
+		pod: corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod-4",
+				Namespace: "test-namespace",
+				Labels: map[string]string{
+					"soft-pod-memory-evicter/eviction-allowed": "true",
 				},
 			},
-			metrics: metricsv1beta1.PodMetrics{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pod-4",
-					Namespace: "test-namespace",
-				},
-				Containers: []metricsv1beta1.ContainerMetrics{
-					containerMetricsWithMemoryUsage("container-1", "1Gi"),
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					containerDefinitionWithMemoryLimit("container-1", "1Gi"),
 				},
 			},
-		}
+		},
+		metrics: metricsv1beta1.PodMetrics{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod-4",
+				Namespace: "test-namespace",
+			},
+			Containers: []metricsv1beta1.ContainerMetrics{
+				containerMetricsWithMemoryUsage("container-1", "1Gi"),
+			},
+		},
 	}
 
 	// A pod with one container that is maxed out having a PodDisruptionBudget
@@ -308,9 +307,9 @@ func TestEvictionHasDryrunSet(t *testing.T) {
 	assert.Equal(t, "All", obj3.(*policyv1.Eviction).DeleteOptions.DryRun[0])
 }
 
-func TestEvictionOnlyAffectsPodsMaxingoutMemoryWithAnnotationOptOut(t *testing.T) {
-	c := fakeController(podSingleMaxedoutContainerWithAnnotation("true"))
-	c.opts.IsAnnotationRequired = false
+func TestEvictionAffectsPodsMaxingoutMemoryMatchingSelector(t *testing.T) {
+	c := fakeController(podSingleMaxedoutContainerWithAnnotation)
+	c.opts.PodSelector.Selector = labels.Set{"soft-pod-memory-evicter/eviction-allowed": "true"}.AsSelector()
 
 	err := c.evictPodsCloseToMemoryLimit(context.Background())
 	assert.NoError(t, err)
@@ -329,62 +328,9 @@ func TestEvictionOnlyAffectsPodsMaxingoutMemoryWithAnnotationOptOut(t *testing.T
 	assert.Equal(t, "/v1, Resource=pods", action4.GetResource().String())
 }
 
-func TestEvictionOnlyAffectsPodsMaxingoutMemoryWithAnnotationToFalseOptOut(t *testing.T) {
-	c := fakeController(podSingleMaxedoutContainerWithAnnotation("false"))
-	c.opts.IsAnnotationRequired = false
-
-	err := c.evictPodsCloseToMemoryLimit(context.Background())
-	assert.NoError(t, err)
-	c.terminate_graceful()
-
-	fakeClientSet := c.clientset.(*fake.Clientset)
-	assert.Equal(t, 4, len(fakeClientSet.Actions()))
-	assertContainsAction(t, fakeClientSet.Actions(), "list", "pods")
-	assertContainsAction(t, fakeClientSet.Actions(), "watch", "pods")
-	assertContainsAction(t, fakeClientSet.Actions(), "list", "poddisruptionbudgets")
-	assertContainsAction(t, fakeClientSet.Actions(), "watch", "poddisruptionbudgets")
-}
-
-func TestEvictionOnlyAffectsPodsMaxingoutMemoryWithAnnotationOptIn(t *testing.T) {
-	c := fakeController(podSingleMaxedoutContainerWithAnnotation("true"))
-	c.opts.IsAnnotationRequired = true
-
-	err := c.evictPodsCloseToMemoryLimit(context.Background())
-	assert.NoError(t, err)
-	c.terminate_graceful()
-
-	fakeClientSet := c.clientset.(*fake.Clientset)
-	assert.Equal(t, 5, len(fakeClientSet.Actions()))
-	assertContainsAction(t, fakeClientSet.Actions(), "list", "pods")
-	assertContainsAction(t, fakeClientSet.Actions(), "watch", "pods")
-	assertContainsAction(t, fakeClientSet.Actions(), "list", "poddisruptionbudgets")
-	assertContainsAction(t, fakeClientSet.Actions(), "watch", "poddisruptionbudgets")
-
-	action4 := fakeClientSet.Actions()[4]
-	assert.Equal(t, "create", action4.GetVerb())
-	assert.Equal(t, "eviction", action4.GetSubresource())
-	assert.Equal(t, "/v1, Resource=pods", action4.GetResource().String())
-}
-
-func TestEvictionOnlyAffectsPodsMaxingoutMemoryWithAnnotationToFalseOptIn(t *testing.T) {
-	c := fakeController(podSingleMaxedoutContainerWithAnnotation("false"))
-	c.opts.IsAnnotationRequired = true
-
-	err := c.evictPodsCloseToMemoryLimit(context.Background())
-	assert.NoError(t, err)
-	c.terminate_graceful()
-
-	fakeClientSet := c.clientset.(*fake.Clientset)
-	assert.Equal(t, 4, len(fakeClientSet.Actions()))
-	assertContainsAction(t, fakeClientSet.Actions(), "list", "pods")
-	assertContainsAction(t, fakeClientSet.Actions(), "watch", "pods")
-	assertContainsAction(t, fakeClientSet.Actions(), "list", "poddisruptionbudgets")
-	assertContainsAction(t, fakeClientSet.Actions(), "watch", "poddisruptionbudgets")
-}
-
-func TestEvictionOnlyAffectsPodsMaxingoutMemoryWithoutAnnotationToFalseOptIn(t *testing.T) {
-	c := fakeController(podSingleMaxedoutContainer)
-	c.opts.IsAnnotationRequired = true
+func TestEvictionDoesnotAffectsPodsMaxingoutMemoryNotMatchingSelector(t *testing.T) {
+	c := fakeController(podSingleMaxedoutContainerWithAnnotation)
+	c.opts.PodSelector.Selector = labels.Nothing()
 
 	err := c.evictPodsCloseToMemoryLimit(context.Background())
 	assert.NoError(t, err)
@@ -460,6 +406,7 @@ func fakeController(podConfigs ...testPod) *controller {
 		podMetrics: dummyPodMetricLister{Items: podMetrics},
 		opts: Options{
 			MemoryUsageThreshold: 90,
+			PodSelector:          SelectorFlag{Selector: labels.Everything()},
 		},
 	}
 }
