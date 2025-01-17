@@ -3,6 +3,7 @@ package pkg
 import (
 	"time"
 
+	"github.com/urfave/cli/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 )
@@ -58,4 +59,7 @@ type Options struct {
 	// It is filled each check interval and drained by the eviction loops. Eviction
 	// pauses and backoffs cause the queue to fill up.
 	ChannelQueueSize int
+
+	// IgnoredNamespaces is a list of namespaces to ignore when checking Pods.
+	IgnoredNamespaces cli.StringSlice
 }

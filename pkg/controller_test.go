@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/urfave/cli/v2"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -331,6 +332,22 @@ func TestEvictionAffectsPodsMaxingoutMemoryMatchingSelector(t *testing.T) {
 func TestEvictionDoesnotAffectsPodsMaxingoutMemoryNotMatchingSelector(t *testing.T) {
 	c := fakeController(podSingleMaxedoutContainerWithAnnotation)
 	c.opts.PodSelector.Selector = labels.Nothing()
+
+	err := c.evictPodsCloseToMemoryLimit(context.Background())
+	assert.NoError(t, err)
+	c.terminate_graceful()
+
+	fakeClientSet := c.clientset.(*fake.Clientset)
+	assert.Equal(t, 4, len(fakeClientSet.Actions()))
+	assertContainsAction(t, fakeClientSet.Actions(), "list", "pods")
+	assertContainsAction(t, fakeClientSet.Actions(), "watch", "pods")
+	assertContainsAction(t, fakeClientSet.Actions(), "list", "poddisruptionbudgets")
+	assertContainsAction(t, fakeClientSet.Actions(), "watch", "poddisruptionbudgets")
+}
+
+func TestEvictionIgnoresNamespaces(t *testing.T) {
+	c := fakeController(podSingleMaxedoutContainer)
+	c.opts.IgnoredNamespaces = *cli.NewStringSlice("test-namespace")
 
 	err := c.evictPodsCloseToMemoryLimit(context.Background())
 	assert.NoError(t, err)

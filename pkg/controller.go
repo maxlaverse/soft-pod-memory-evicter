@@ -3,6 +3,7 @@ package pkg
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -203,6 +204,11 @@ func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context) error {
 
 	for _, podMetric := range podMetrics.Items {
 		klog.V(2).Infof("Checking Pod '%s/%s'", podMetric.Namespace, podMetric.Name)
+		if slices.Contains(c.opts.IgnoredNamespaces.Value(), podMetric.Namespace) {
+			klog.V(2).Infof("Pod '%s/%s' is in an ignored namespace, skipping", podMetric.Namespace, podMetric.Name)
+			continue
+		}
+
 		pod, err := c.lister.Pods(podMetric.Namespace).Get(podMetric.Name)
 		if err != nil {
 			klog.Errorf("Could not find Pod definition for '%s/%s'", podMetric.Namespace, podMetric.Name)

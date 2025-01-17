@@ -33,14 +33,15 @@ COMMANDS:
    help, h  Shows a list of commands or help for one command
 
 GLOBAL OPTIONS:
-   --dry-run                            Output additional debug lines (default: false)
-   --pod-selector value                 Evict only Pods matching this label selector
-   --eviction-pause value               Pause duration between evictions (default: 5m0s)
-   --memory-usage-check-interval value  Interval at which the Pod metrics are checked (default: 3m0s)
-   --memory-usage-threshold value       Memory usage eviction threshold (0-100) (default: 95)
-   --channel-queue-size value           Size of the queue for pod eviction (default: 100)
-   --loglevel value, -v value           Log Level (default: 0)
-   --help, -h                           show help
+   --dry-run                                              Output additional debug lines (default: false)
+   --pod-selector value                                   Evict only Pods matching this label selector
+   --eviction-pause value                                 Pause duration between evictions (default: 5m0s)
+   --memory-usage-check-interval value                    Interval at which the Pod metrics are checked (default: 3m0s)
+   --memory-usage-threshold value                         Memory usage eviction threshold (0-100) (default: 95)
+   --channel-queue-size value                             Size of the queue for pod eviction (default: 100)
+   --ignore-namespace value [ --ignore-namespace value ]  Do not evict Pods from this namespace. Can be used multiple times
+   --loglevel value, -v value                             Log Level (default: 0)
+   --help, -h                                             show help
 ```
 
 ## License
