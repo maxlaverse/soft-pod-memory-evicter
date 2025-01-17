@@ -34,6 +34,7 @@ COMMANDS:
 
 GLOBAL OPTIONS:
    --dry-run                                              Output additional debug lines (default: false)
+   --pod-selector value                                   Evict only Pods matching this label selector
    --eviction-pause value                                 Pause duration between evictions (default: 5m0s)
    --memory-usage-check-interval value                    Interval at which the Pod metrics are checked (default: 3m0s)
    --memory-usage-threshold value                         Memory usage eviction threshold (0-100) (default: 95)

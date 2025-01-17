@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/urfave/cli/v2"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,34 +30,6 @@ const (
 
 type Controller interface {
 	Run(ctx context.Context) error
-}
-
-type Options struct {
-	// DryRun=true won't evict Pods for real
-	DryRun bool
-
-	// MemoryUsageThreshold is the threshold (0-100) above which a Pod is considered
-	// as overusing its memory.
-	MemoryUsageThreshold int
-
-	// EvictionPause is the delay we wait between two evictions, to prevent
-	// removing too many Pods at once. Else we could more easily have downtimes if
-	// Deployments don't specify a PodDisruptionBudget. Pods defining a
-	// PodDisruptionBudget will ignore the pause, but respecting the budget.
-	EvictionPause time.Duration
-
-	// MemoryUsageCheckInterval is how often we check the memory usage.
-	// It doesn't need to be too frequent, as we have to wait for the metric-server
-	// to refresh the metrics all the time.
-	MemoryUsageCheckInterval time.Duration
-
-	// ChannelQueueSize is the size of the queue for Pods to evict.
-	// It is filled each check interval and drained by the eviction loops. Eviction
-	// pauses and backoffs cause the queue to fill up.
-	ChannelQueueSize int
-
-	// IgnoredNamespaces is a list of namespaces to ignore when checking Pods.
-	IgnoredNamespaces cli.StringSlice
 }
 
 type PodMetricsInterfaceList interface {
@@ -241,6 +212,11 @@ func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context) error {
 		pod, err := c.lister.Pods(podMetric.Namespace).Get(podMetric.Name)
 		if err != nil {
 			klog.Errorf("Could not find Pod definition for '%s/%s'", podMetric.Namespace, podMetric.Name)
+			continue
+		}
+
+		if !c.opts.PodSelector.Selector.Matches(labels.Set(pod.Labels)) {
+			klog.V(2).Infof("Pod '%s/%s' does not match PodSelector, skipping", podMetric.Namespace, podMetric.Name)
 			continue
 		}
 

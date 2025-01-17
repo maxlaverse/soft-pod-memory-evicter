@@ -10,12 +10,14 @@ import (
 
 	"github.com/maxlaverse/soft-pod-memory-evicter/pkg"
 	"github.com/urfave/cli/v2"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/klog/v2"
 )
 
 func main() {
 	opts := pkg.Options{
 		DryRun:                   false,
+		PodSelector:              pkg.SelectorFlag{Selector: labels.Everything()},
 		EvictionPause:            time.Duration(5) * time.Minute,
 		MemoryUsageCheckInterval: time.Duration(3) * time.Minute,
 		MemoryUsageThreshold:     95,
@@ -37,6 +39,11 @@ func main() {
 				Usage:       "Output additional debug lines",
 				Value:       opts.DryRun,
 				Destination: &opts.DryRun,
+			}, &cli.GenericFlag{
+				Name:        "pod-selector",
+				Usage:       "Evict only Pods matching this label selector",
+				Value:       &opts.PodSelector,
+				Destination: &opts.PodSelector,
 			}, &cli.DurationFlag{
 				Name:        "eviction-pause",
 				Usage:       "Pause duration between evictions",
