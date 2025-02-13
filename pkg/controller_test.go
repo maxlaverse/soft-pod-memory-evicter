@@ -212,6 +212,33 @@ var (
 			},
 		},
 	}
+
+	// A Pod with one container that is maxed out only according to its custom threshold
+	podSingleMaxedoutContainerWithCustomThreshold = testPod{
+		pod: corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod-6-custom",
+				Namespace: "test-namespace",
+				Annotations: map[string]string{
+					memoryUsageThresholdAnnotation: "40",
+				},
+			},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					containerDefinitionWithMemoryLimit("container-1", "1Gi"),
+				},
+			},
+		},
+		metrics: metricsv1beta1.PodMetrics{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod-6-custom",
+				Namespace: "test-namespace",
+			},
+			Containers: []metricsv1beta1.ContainerMetrics{
+				containerMetricsWithMemoryUsage("container-1", "0.5Gi"),
+			},
+		},
+	}
 )
 
 func TestContainerIdentificationFailsIfContainerDefinitionCantBeFound(t *testing.T) {
@@ -268,6 +295,35 @@ func TestEvictionOnlyAffectsPodsMaxingoutMemory(t *testing.T) {
 	assert.Equal(t, "test-pod-4", obj3.(*policyv1.Eviction).Name)
 	assert.Equal(t, "test-namespace", obj3.(*policyv1.Eviction).Namespace)
 	assert.Nil(t, obj3.(*policyv1.Eviction).DeleteOptions)
+}
+
+func TestEvictionTakesCustomThresholdIntoAccount(t *testing.T) {
+	c := fakeController(podSingleMaxedoutContainerWithCustomThreshold)
+
+	err := c.evictPodsCloseToMemoryLimit(context.Background())
+	assert.NoError(t, err)
+	c.terminate_graceful()
+
+	fakeClientSet := c.clientset.(*fake.Clientset)
+	if !assert.Equal(t, 5, len(fakeClientSet.Actions())) {
+		return
+	}
+
+	first_four_actions := fakeClientSet.Actions()[:4]
+	assertContainsAction(t, first_four_actions, "list", "pods")
+	assertContainsAction(t, first_four_actions, "watch", "pods")
+	assertContainsAction(t, first_four_actions, "list", "poddisruptionbudgets")
+	assertContainsAction(t, first_four_actions, "watch", "poddisruptionbudgets")
+
+	action4 := fakeClientSet.Actions()[4]
+	assert.Equal(t, "create", action4.GetVerb())
+	assert.Equal(t, "eviction", action4.GetSubresource())
+	assert.Equal(t, "/v1, Resource=pods", action4.GetResource().String())
+
+	obj2 := action4.(clientgo_testing.CreateAction).GetObject()
+	assert.Equal(t, "test-pod-6-custom", obj2.(*policyv1.Eviction).Name)
+	assert.Equal(t, "test-namespace", obj2.(*policyv1.Eviction).Namespace)
+	assert.Nil(t, obj2.(*policyv1.Eviction).DeleteOptions)
 }
 
 func TestEvictionHasDryrunSet(t *testing.T) {
@@ -386,6 +442,70 @@ func TestEvictionAlsoWorksForPodsWithDisruptionBudget(t *testing.T) {
 	assert.Equal(t, "test-pod-5", obj2.(*policyv1.Eviction).Name)
 	assert.Equal(t, "test-namespace", obj2.(*policyv1.Eviction).Namespace)
 	assert.Nil(t, obj2.(*policyv1.Eviction).DeleteOptions)
+}
+
+func TestGetPodMemoryUsageThreshold(t *testing.T) {
+	tests := []struct {
+		name           string
+		pod            *corev1.Pod
+		defaultValue   float64
+		expectedResult float64
+	}{
+		{
+			name: "no annotation uses default value",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+				},
+			},
+			defaultValue:   80.0,
+			expectedResult: 80.0,
+		},
+		{
+			name: "valid annotation overrides default",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+					Annotations: map[string]string{
+						memoryUsageThresholdAnnotation: "90.5",
+					},
+				},
+			},
+			defaultValue:   80.0,
+			expectedResult: 90.5,
+		},
+		{
+			name: "invalid annotation falls back to default",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+					Annotations: map[string]string{
+						memoryUsageThresholdAnnotation: "invalid",
+					},
+				},
+			},
+			defaultValue:   80.0,
+			expectedResult: 80.0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &controller{
+				opts: Options{
+					MemoryUsageThreshold: int(tt.defaultValue),
+				},
+			}
+
+			result := c.getPodMemoryUsageThreshold(tt.pod)
+			if result != tt.expectedResult {
+				t.Errorf("getPodMemoryUsageThreshold() = %v, want %v", result, tt.expectedResult)
+			}
+		})
+	}
 }
 
 func fakeController(podConfigs ...testPod) *controller {
