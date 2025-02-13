@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,6 +27,9 @@ import (
 const (
 	// componentName is used when creating Kubernetes Events
 	componentName = "soft-pod-memory-evicter"
+
+	// memoryUsageThresholdAnnotation is the annotation key for specifying memory usage threshold
+	memoryUsageThresholdAnnotation = "laverse.net/memory-usage-threshold"
 )
 
 type Controller interface {
@@ -220,9 +224,9 @@ func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context) error {
 			continue
 		}
 
-		containers, err := identifyContainersCloseToMemoryLimit(podMetric, *pod, float64(c.opts.MemoryUsageThreshold))
+		containers, err := identifyContainersCloseToMemoryLimit(podMetric, *pod, c.getPodMemoryUsageThreshold(pod))
 		if err != nil {
-			klog.Errorf("could not find Pod Container overusers '%s/%s'", podMetric.Namespace, podMetric.Name)
+			klog.Errorf("could not find Pod Container over-user '%s/%s'", podMetric.Namespace, podMetric.Name)
 			continue
 		}
 
@@ -233,6 +237,26 @@ func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context) error {
 
 	klog.V(2).Info("Pods memory usage check done")
 	return nil
+}
+
+// getPodMemoryUsageThreshold returns the memory usage threshold for a pod.
+// If the pod has a memory-usage-threshold annotation, it will be used.
+// Otherwise, the default threshold will be used.
+func (c *controller) getPodMemoryUsageThreshold(pod *corev1.Pod) float64 {
+	defaultThreshold := float64(c.opts.MemoryUsageThreshold)
+	memoryUsageThresholdString, ok := pod.GetAnnotations()[memoryUsageThresholdAnnotation]
+	if !ok {
+		klog.V(2).Infof("Pod '%s/%s' does not have a memory-usage-threshold annotation, using default: %v", pod.Namespace, pod.Name, defaultThreshold)
+		return defaultThreshold
+	}
+
+	threshold, err := strconv.ParseFloat(memoryUsageThresholdString, 64)
+	if err != nil {
+		klog.Errorf("could not parse memory-usage-threshold annotation for '%s/%s': %v, using default: %v", pod.Namespace, pod.Name, err, defaultThreshold)
+		return defaultThreshold
+	}
+
+	return threshold
 }
 
 func identifyContainersCloseToMemoryLimit(podMetrics metricsv1beta1.PodMetrics, podDefinition corev1.Pod, usageMemoryUsageThresholdPercent float64) ([]string, error) {
@@ -264,7 +288,7 @@ func identifyContainersCloseToMemoryLimit(podMetrics metricsv1beta1.PodMetrics, 
 		memoryUsagePercent := 100 * containerMetric.Usage.Memory().AsApproximateFloat64() / containerDefinition.Resources.Limits.Memory().AsApproximateFloat64()
 		klog.V(1).Infof("Memory usage for '%s/%s/%s' is %.1f%%\n", podMetrics.Namespace, podMetrics.Name, containerMetric.Name, memoryUsagePercent)
 
-		if memoryUsagePercent > usageMemoryUsageThresholdPercent {
+		if memoryUsagePercent >= usageMemoryUsageThresholdPercent {
 			containerOverConsuming = append(containerOverConsuming, containerMetric.Name)
 		}
 	}
