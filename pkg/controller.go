@@ -29,7 +29,7 @@ const (
 	componentName = "soft-pod-memory-evicter"
 
 	// memoryUsageThresholdAnnotation is the annotation key for specifying memory usage threshold
-	memoryUsageThresholdAnnotation = "laverse.net/memory-usage-threshold"
+	memoryUsageThresholdAnnotation = "soft-pod-memory-evicter.laverse.net/memory-usage-threshold"
 )
 
 type Controller interface {
