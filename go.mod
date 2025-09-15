@@ -5,11 +5,11 @@ go 1.24.0
 require (
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v2 v2.27.7
-	k8s.io/api v0.34.0
-	k8s.io/apimachinery v0.34.0
-	k8s.io/client-go v0.34.0
+	k8s.io/api v0.34.1
+	k8s.io/apimachinery v0.34.1
+	k8s.io/client-go v0.34.1
 	k8s.io/klog/v2 v2.130.1
-	k8s.io/metrics v0.34.0
+	k8s.io/metrics v0.34.1
 )
 
 require (
