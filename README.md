@@ -43,8 +43,24 @@ GLOBAL OPTIONS:
    --memory-usage-threshold value                         Memory usage eviction threshold (0-100) (default: 95)
    --channel-queue-size value                             Size of the queue for pod eviction (default: 100)
    --ignore-namespace value [ --ignore-namespace value ]  Do not evict Pods from this namespace. Can be used multiple times
+   --enable-metrics value                                 Expose Prometheus metrics endpoint (default: false)
+   --metrics-bind-address value                           Bind address for the Prometheus exporter (default: :9288)
    --loglevel value, -v value                             Log Level (default: 0)
    --help, -h                                             show help
+```
+
+## Metrics
+
+Enable the exporter with `--enable-metrics` and set `--metrics-bind-address` (for example, `:9288`). The endpoint is served at `/metrics` and currently publishes a single counter:
+
+- `soft_pod_memory_evicter_evicted_pods_total{affected_namespace="<ns>",affected_app_kubernetes_io_name="<name>",affected_app_kubernetes_io_instance="<instance>"}` — counts evictions per workload (namespace + app.kubernetes.io/name + app.kubernetes.io/instance).
+
+You might also want to add the following annotations into Helm values to let Prometheus know about the exporter:
+
+```yaml
+podAnnotations:
+  "prometheus.io/scrape": "true"
+  "prometheus.io/port": "9288"
 ```
 
 ## Pod-specific configurations

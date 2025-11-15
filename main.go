@@ -23,6 +23,8 @@ func main() {
 		MemoryUsageThreshold:     95,
 		ChannelQueueSize:         100,
 		IgnoredNamespaces:        *cli.NewStringSlice(),
+		EnableMetrics:            false,
+		MetricsBindAddress:       ":9288",
 	}
 
 	app := &cli.App{
@@ -69,6 +71,16 @@ func main() {
 				Usage:       "Do not evict Pods from this namespace. Can be used multiple times",
 				Value:       &opts.IgnoredNamespaces,
 				Destination: &opts.IgnoredNamespaces,
+			}, &cli.BoolFlag{
+				Name:        "enable-metrics",
+				Usage:       "Expose Prometheus metrics endpoint",
+				Value:       opts.EnableMetrics,
+				Destination: &opts.EnableMetrics,
+			}, &cli.StringFlag{
+				Name:        "metrics-bind-address",
+				Usage:       "Bind address for the Prometheus exporter",
+				Value:       opts.MetricsBindAddress,
+				Destination: &opts.MetricsBindAddress,
 			},
 			&cli.IntFlag{
 				Name:    "loglevel",

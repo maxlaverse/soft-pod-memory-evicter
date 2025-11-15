@@ -62,4 +62,11 @@ type Options struct {
 
 	// IgnoredNamespaces is a list of namespaces to ignore when checking Pods.
 	IgnoredNamespaces cli.StringSlice
+
+	// EnableMetrics toggles the Prometheus exporter.
+	EnableMetrics bool
+
+	// MetricsBindAddress is the bind address for the Prometheus exporter
+	// (for example, ":9288").
+	MetricsBindAddress string
 }

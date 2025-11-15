@@ -30,6 +30,9 @@ const (
 
 	// memoryUsageThresholdAnnotation is the annotation key for specifying memory usage threshold
 	memoryUsageThresholdAnnotation = "soft-pod-memory-evicter.laverse.net/memory-usage-threshold"
+
+	appKubernetesNameLabel     = "app.kubernetes.io/name"
+	appKubernetesInstanceLabel = "app.kubernetes.io/instance"
 )
 
 type Controller interface {
@@ -47,6 +50,7 @@ type controller struct {
 	factory    informers.SharedInformerFactory
 	clientset  kubernetes.Interface
 	recorder   record.EventRecorder
+	metrics    metricsRecorder
 	opts       Options
 	pauseChan  chan *corev1.Pod // eviction channel for Pods without PodDisruptionBudget
 	pdbChan    chan *corev1.Pod // eviction channel for Pods with PodDisruptionBudget
@@ -85,11 +89,13 @@ func NewController(opts Options) Controller {
 			scheme.Scheme,
 			corev1.EventSource{Component: componentName},
 		),
+		metrics: newMetricsRecorder(opts),
 	}
 }
 
 func (c *controller) Run(ctx context.Context) error {
 	stopCh := make(chan struct{})
+	c.metrics.Start(ctx)
 
 	klog.V(1).Info("1/3 Starting Factory")
 	c.factory.Start(stopCh)
@@ -142,6 +148,7 @@ func (c *controller) evictWithPauseChanLoop(ctx context.Context) {
 			time.Sleep(c.opts.EvictionPause)
 		}
 
+		c.metrics.RecordPodEviction(pod.Namespace, appNameLabel(pod), appInstanceLabel(pod))
 		klog.V(2).Infof("Pod '%s/%s' evicted", pod.Namespace, pod.Name)
 	}
 }
@@ -162,6 +169,7 @@ func (c *controller) evictWithPDBChanLoop(ctx context.Context) {
 			continue
 		}
 
+		c.metrics.RecordPodEviction(pod.Namespace, appNameLabel(pod), appInstanceLabel(pod))
 		klog.V(2).Infof("Pod '%s/%s' evicted", pod.Namespace, pod.Name)
 	}
 }
@@ -224,6 +232,8 @@ func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context) error {
 			continue
 		}
 
+		c.metrics.RecordObservedNamespace(pod.Namespace, appNameLabel(pod), appInstanceLabel(pod))
+
 		containers, err := identifyContainersCloseToMemoryLimit(podMetric, *pod, c.getPodMemoryUsageThreshold(pod))
 		if err != nil {
 			klog.Errorf("could not find Pod Container over-user '%s/%s'", podMetric.Namespace, podMetric.Name)
@@ -257,6 +267,26 @@ func (c *controller) getPodMemoryUsageThreshold(pod *corev1.Pod) float64 {
 	}
 
 	return threshold
+}
+
+func appNameLabel(pod *corev1.Pod) string {
+	if pod == nil {
+		return ""
+	}
+	if value, ok := pod.Labels[appKubernetesNameLabel]; ok {
+		return value
+	}
+	return ""
+}
+
+func appInstanceLabel(pod *corev1.Pod) string {
+	if pod == nil {
+		return ""
+	}
+	if value, ok := pod.Labels[appKubernetesInstanceLabel]; ok {
+		return value
+	}
+	return ""
 }
 
 func identifyContainersCloseToMemoryLimit(podMetrics metricsv1beta1.PodMetrics, podDefinition corev1.Pod, usageMemoryUsageThresholdPercent float64) ([]string, error) {
