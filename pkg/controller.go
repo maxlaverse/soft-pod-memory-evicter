@@ -148,7 +148,7 @@ func (c *controller) evictWithPauseChanLoop(ctx context.Context) {
 			time.Sleep(c.opts.EvictionPause)
 		}
 
-		c.metrics.RecordPodEviction(pod.Namespace, appNameLabel(pod), appInstanceLabel(pod))
+		c.metrics.RecordPodEviction(pod)
 		klog.V(2).Infof("Pod '%s/%s' evicted", pod.Namespace, pod.Name)
 	}
 }
@@ -169,7 +169,7 @@ func (c *controller) evictWithPDBChanLoop(ctx context.Context) {
 			continue
 		}
 
-		c.metrics.RecordPodEviction(pod.Namespace, appNameLabel(pod), appInstanceLabel(pod))
+		c.metrics.RecordPodEviction(pod)
 		klog.V(2).Infof("Pod '%s/%s' evicted", pod.Namespace, pod.Name)
 	}
 }
@@ -232,7 +232,7 @@ func (c *controller) evictPodsCloseToMemoryLimit(ctx context.Context) error {
 			continue
 		}
 
-		c.metrics.RecordObservedNamespace(pod.Namespace, appNameLabel(pod), appInstanceLabel(pod))
+		c.metrics.RecordObservedNamespace(pod)
 
 		containers, err := identifyContainersCloseToMemoryLimit(podMetric, *pod, c.getPodMemoryUsageThreshold(pod))
 		if err != nil {
@@ -267,26 +267,6 @@ func (c *controller) getPodMemoryUsageThreshold(pod *corev1.Pod) float64 {
 	}
 
 	return threshold
-}
-
-func appNameLabel(pod *corev1.Pod) string {
-	if pod == nil {
-		return ""
-	}
-	if value, ok := pod.Labels[appKubernetesNameLabel]; ok {
-		return value
-	}
-	return ""
-}
-
-func appInstanceLabel(pod *corev1.Pod) string {
-	if pod == nil {
-		return ""
-	}
-	if value, ok := pod.Labels[appKubernetesInstanceLabel]; ok {
-		return value
-	}
-	return ""
 }
 
 func identifyContainersCloseToMemoryLimit(podMetrics metricsv1beta1.PodMetrics, podDefinition corev1.Pod, usageMemoryUsageThresholdPercent float64) ([]string, error) {
