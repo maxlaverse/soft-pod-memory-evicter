@@ -3,9 +3,11 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/maxlaverse/soft-pod-memory-evicter/pkg"
@@ -23,6 +25,8 @@ func main() {
 		MemoryUsageThreshold:     95,
 		ChannelQueueSize:         100,
 		IgnoredNamespaces:        *cli.NewStringSlice(),
+		EnableMetrics:            false,
+		MetricsBindAddress:       ":9288",
 	}
 
 	app := &cli.App{
@@ -31,7 +35,22 @@ func main() {
 		Before: func(c *cli.Context) error {
 			fs := flag.NewFlagSet("", flag.PanicOnError)
 			klog.InitFlags(fs)
-			return fs.Set("v", strconv.Itoa(c.Int("loglevel")))
+			if err := fs.Set("v", strconv.Itoa(c.Int("loglevel"))); err != nil {
+				return err
+			}
+
+			if opts.EnableMetrics {
+				bindAddr := strings.TrimSpace(opts.MetricsBindAddress)
+				if bindAddr == "" {
+					return fmt.Errorf("--metrics-bind-address cannot be empty when --enable-metrics is true")
+				}
+
+				if _, _, err := net.SplitHostPort(bindAddr); err != nil {
+					return fmt.Errorf("invalid --metrics-bind-address: %w", err)
+				}
+			}
+
+			return nil
 		},
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
@@ -69,6 +88,16 @@ func main() {
 				Usage:       "Do not evict Pods from this namespace. Can be used multiple times",
 				Value:       &opts.IgnoredNamespaces,
 				Destination: &opts.IgnoredNamespaces,
+			}, &cli.BoolFlag{
+				Name:        "enable-metrics",
+				Usage:       "Expose Prometheus metrics endpoint",
+				Value:       opts.EnableMetrics,
+				Destination: &opts.EnableMetrics,
+			}, &cli.StringFlag{
+				Name:        "metrics-bind-address",
+				Usage:       "Bind address for the Prometheus exporter",
+				Value:       opts.MetricsBindAddress,
+				Destination: &opts.MetricsBindAddress,
 			},
 			&cli.IntFlag{
 				Name:    "loglevel",

@@ -495,6 +495,7 @@ func TestGetPodMemoryUsageThreshold(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &controller{
+				metrics: noopMetricsRecorder{},
 				opts: Options{
 					MemoryUsageThreshold: int(tt.defaultValue),
 				},
@@ -533,6 +534,7 @@ func fakeController(podConfigs ...testPod) *controller {
 		lister:    lister,
 		pdbLister: pdbLister,
 		recorder:  record.NewFakeRecorder(10),
+		metrics:   noopMetricsRecorder{},
 		pauseChan: make(chan *corev1.Pod, 10),
 		pdbChan:   make(chan *corev1.Pod, 10),
 
